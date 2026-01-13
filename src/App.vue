@@ -11,6 +11,8 @@ const mySeatIndex = ref(-1);
 const myHand = ref<any[]>([]);
 const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
 
+// --- 修复：将属性改为必填，以满足 PokerCard 组件的类型要求 ---
+// 虽然 hidden 牌实际上没有这些属性，但我们在模板中通过 v-if 避开了渲染，所以这里可以安全地“撒谎”
 interface Card {
   suit: string;
   rank: string;
@@ -25,6 +27,7 @@ interface Player {
   betArea: Record<number, number>;
   hand: Card[] | null;
   slots: { [key: number]: Card[] }; 
+  shownSlots: number[];
   isFolded: boolean;
   isShowing: boolean;
   buyInCount: number;
@@ -118,6 +121,12 @@ const showHand = () => {
   }
 };
 
+const showSlot = (slotId: number) => {
+  if (mySeatIndex.value !== -1) {
+    socket.emit('show-slot', { seatIndex: mySeatIndex.value, slotId });
+  }
+};
+
 const takePot = (seatIdx: number) => {
   socket.emit('chip-action', { action: 'TAKE_POT', seatIndex: seatIdx });
 };
@@ -203,23 +212,39 @@ const getSeatStyle = (index: number) => {
              }">
           <button class="win-btn" @click="takePot(index)">收底池</button>
 
-          <!-- 1. 牌槽区域：纵向排列 -->
-          <div class="slots-container" :class="{ 'showdown-effect': seat.isShowing }">
-            <div v-for="i in 3" :key="i" class="slot-box">
-              <div class="slot-label">{{ i }}</div>
+          <!-- 1. 牌槽区域 -->
+          <div class="slots-container">
+            <div v-for="i in 3" :key="i" class="slot-box" 
+                 :class="{ 'showdown-effect': seat.isShowing || (seat.shownSlots && seat.shownSlots.includes(i)) }">
+              
+              <div class="slot-left">
+                <div class="slot-label">{{ i }}</div>
+                <button v-if="index === mySeatIndex && !seat.isShowing && (!seat.shownSlots || !seat.shownSlots.includes(i))" 
+                        class="slot-show-btn" 
+                        @click.stop="showSlot(i)" 
+                        title="亮出此道">
+                  👁️
+                </button>
+              </div>
+
               <div class="slot-cards">
-                <template v-if="index === mySeatIndex || seat.isShowing">
-                  <PokerCard 
-                    v-for="c in (index === mySeatIndex ? mySlots[i] : seat.slots[i])" 
+                <template v-if="index === mySeatIndex">
+                   <PokerCard 
+                    v-for="c in mySlots[i]" 
                     :key="c.id" 
                     :card="c" 
                     width="25px" 
-                    @click="index === mySeatIndex ? clickSlotCard(c) : null"
-                    :style="{ cursor: index === mySeatIndex ? 'pointer' : 'default' }"
+                    @click="clickSlotCard(c)"
+                    style="cursor: pointer;"
                   />
                 </template>
+                
                 <template v-else>
-                  <div v-for="k in (seat.slots[i]?.length || 0)" :key="k" class="card-back-xs"></div>
+                  <template v-for="(c, k) in (seat.slots[i] || [])" :key="k">
+                    <!-- 关键：这里通过 v-if 确保了只有真实牌才会传给 PokerCard -->
+                    <div v-if="c.id === 'hidden'" class="card-back-xs"></div>
+                    <PokerCard v-else :card="c" width="25px" />
+                  </template>
                 </template>
               </div>
             </div>
@@ -270,7 +295,7 @@ const getSeatStyle = (index: number) => {
             <div class="action-btns" v-if="index === mySeatIndex">
               <button class="buyin-btn" @click="buyIn" title="买入">+💰</button>
               <button class="fold-btn" @click="fold" title="弃牌">✕</button>
-              <button class="show-btn" @click="showHand" title="亮牌">👁️</button>
+              <button class="show-btn" @click="showHand" title="全亮">👁️</button>
             </div>
 
             <ChipStack v-for="v in [1, 5, 25, 100]" :key="v" :value="v" 
@@ -316,7 +341,6 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .fixed-reset-btn { position: fixed; top: 15px; left: 15px; z-index: 1000; background: #b71c1c; color: #ffcdd2; border: 1px solid #e53935; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
 .fixed-reset-btn:hover { background: #d32f2f; transform: scale(1.05); }
 
-/* 修改：增加座位高度以容纳纵向牌槽 */
 .seat-wrapper { position: absolute; top: 50%; left: 50%; width: 160px; height: 340px; margin-left: -80px; margin-top: -170px; display: flex; justify-content: center; align-items: center; pointer-events: none; }
 .seat-wrapper > * { pointer-events: auto; }
 .empty-seat { width: 60px; height: 60px; border-radius: 50%; border: 2px dashed #666; display: flex; justify-content: center; align-items: center; cursor: pointer; color: #888; }
@@ -329,7 +353,6 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .stack-zone { width: 100%; height: 70px; background: rgba(0,0,0,0.4); border-radius: 10px; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 5px; position: relative; }
 .hand { display: flex; gap: 4px; margin-top: 2px; height: 65px; align-items: center; position: relative; }
 .card-back-sm { width: 28px; height: 39px; background: #3b4a8c; border: 2px solid white; border-radius: 3px; }
-/* 修改：更小的牌背尺寸 */
 .card-back-xs { width: 25px; height: 35px; background: #3b4a8c; border: 1px solid white; border-radius: 2px; }
 
 .folded { filter: grayscale(100%); opacity: 0.6; }
@@ -362,22 +385,21 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .hand .card, .board .card { box-shadow: none !important; -webkit-box-shadow: none !important; }
 .card .rank, .card .suit { text-shadow: none !important; }
 
-/* --- 修改：纵向牌槽样式 --- */
 .slots-container {
   display: flex; 
-  flex-direction: column; /* 纵向 */
+  flex-direction: column; 
   gap: 2px; 
   margin-bottom: 5px; 
   background: rgba(0,0,0,0.2); 
   padding: 4px; 
   border-radius: 6px;
   transition: all 0.3s;
-  width: 100%; /* 占满宽度 */
+  width: 100%; 
   align-items: center;
 }
 .slot-box {
   display: flex; 
-  flex-direction: row; /* 横向：左标号 右牌 */
+  flex-direction: row; 
   align-items: center;
   justify-content: center;
   gap: 5px;
@@ -388,7 +410,19 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   width: 100%;
   min-height: 35px;
 }
-.slot-label { font-size: 0.7em; color: #aaa; margin-bottom: 0; margin-right: 5px; font-weight: bold; }
+.slot-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 25px; 
+  justify-content: flex-end;
+}
+.slot-label { font-size: 0.7em; color: #aaa; margin-bottom: 0; font-weight: bold; }
+.slot-show-btn {
+  background: none; border: none; cursor: pointer; font-size: 10px; padding: 0; opacity: 0.7;
+}
+.slot-show-btn:hover { opacity: 1; transform: scale(1.2); }
+
 .slot-cards { display: flex; gap: 2px; justify-content: center; }
 .hover-card:hover { transform: translateY(-5px) !important; filter: brightness(1.1); }
 

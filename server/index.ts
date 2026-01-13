@@ -4,7 +4,6 @@ import { Server, Socket } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// ESM 路径修复
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -12,10 +11,8 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
-// 托管前端
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// --- 筹码和公共牌逻辑保持不变 ---
 const CHIP_VALUES = [1, 5, 25, 100];
 const SUITS = ['♠', '♥', '♣', '♦'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -36,7 +33,11 @@ class Deck {
     this.cards = [];
     for (let s of SUITS) for (let r of RANKS) 
       this.cards.push({ suit: s, rank: r, color: (s === '♥' || s === '♦') ? 'red' : 'black', id: s+r });
-    this.cards.sort(() => Math.random() - 0.5);
+    // Fisher-Yates 洗牌
+    for (let i = this.cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
+    }
   }
   deal() { return this.cards.pop(); }
 }
@@ -72,10 +73,11 @@ io.on('connection', (socket: Socket) => {
         buyInCount: 1,
         stack: { 100: 4, 25: 20, 5: 15, 1: 25 }, 
         betArea: { 100: 0, 25: 0, 5: 0, 1: 0 },
-        hand: [], // 这里存放“未分配”的手牌
-        slots: { 1: [], 2: [], 3: [] }, // 新增：3个牌槽
+        hand: [], 
+        slots: { 1: [], 2: [], 3: [] },
+        shownSlots: [], // 新增：记录哪些道已经亮出
         isFolded: false,
-        isShowing: false
+        isShowing: false // 全亮标志
       };
       if (isFirstPlayer) gameState.dealerIndex = seatIndex;
       io.emit('update', getPublicState());
@@ -113,17 +115,26 @@ io.on('connection', (socket: Socket) => {
   socket.on('show-hand', ({ seatIndex }) => {
     const p = gameState.seats[seatIndex];
     if (p) {
-      p.isShowing = true;
+      p.isShowing = true; // 全亮
       io.emit('update', getPublicState());
     }
   });
 
-  // --- 新增：卡牌移动逻辑 (手牌 <-> 牌槽) ---
+  // --- 新增：单独亮某一道 ---
+  socket.on('show-slot', ({ seatIndex, slotId }) => {
+    const p = gameState.seats[seatIndex];
+    if (p) {
+      if (!p.shownSlots.includes(slotId)) {
+        p.shownSlots.push(slotId);
+        io.emit('update', getPublicState());
+      }
+    }
+  });
+
   socket.on('move-card', ({ seatIndex, cardId, target }) => {
     const p = gameState.seats[seatIndex];
-    if (!p || p.id !== socket.id) return; // 安全检查
+    if (!p || p.id !== socket.id) return; 
 
-    // 1. 寻找这张牌在哪里 (hand 还是 slots)
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
     let card = null;
@@ -131,7 +142,6 @@ io.on('connection', (socket: Socket) => {
     if (cardIndex !== -1) {
       card = p.hand[cardIndex];
     } else {
-      // 没在手牌，找找牌槽
       for (let i = 1; i <= 3; i++) {
         const idx = p.slots[i].findIndex((c: any) => c.id === cardId);
         if (idx !== -1) {
@@ -143,34 +153,25 @@ io.on('connection', (socket: Socket) => {
       }
     }
 
-    if (!card) return; // 没找到牌
+    if (!card) return; 
 
-    // 2. 执行移动
-    // 如果目标是 'hand' (收回手牌)
     if (target === 'hand') {
-      if (sourceLocation === 'hand') return; // 已经在手牌了
-      // 从牌槽移除
+      if (sourceLocation === 'hand') return; 
       const slotNum = parseInt(sourceLocation.split('-')[1]);
       p.slots[slotNum].splice(cardIndex, 1);
-      // 加回手牌
       p.hand.push(card);
     } 
-    // 如果目标是牌槽 (1, 2, 3)
     else {
       const slotNum = parseInt(target);
       if (isNaN(slotNum) || slotNum < 1 || slotNum > 3) return;
-      
-      // 检查容量：每个牌槽最多2张
       if (p.slots[slotNum].length >= 2) return;
 
-      // 从源头移除
       if (sourceLocation === 'hand') {
         p.hand.splice(cardIndex, 1);
       } else {
         const srcSlot = parseInt(sourceLocation.split('-')[1]);
         p.slots[srcSlot].splice(cardIndex, 1);
       }
-      // 加入目标牌槽
       p.slots[slotNum].push(card);
     }
 
@@ -224,13 +225,10 @@ io.on('connection', (socket: Socket) => {
 
       gameState.seats.forEach(p => {
         if (p) {
-          // --- 修改：发7张牌 ---
           p.hand = [];
           for(let i=0; i<7; i++) p.hand.push(deck.deal());
-          
-          // --- 修改：重置牌槽 ---
           p.slots = { 1: [], 2: [], 3: [] };
-
+          p.shownSlots = []; // 重置单独亮牌状态
           p.isFolded = false;
           p.isShowing = false;
           CHIP_VALUES.forEach(v => moveChip(p.betArea, p.stack, v, p.betArea[v]));
@@ -263,7 +261,6 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('get-my-hand', (seatIndex, callback) => {
       const p = gameState.seats[seatIndex];
-      // 返回手牌和牌槽数据
       if (p && p.id === socket.id) {
         callback({ hand: p.hand, slots: p.slots });
       } else {
@@ -277,12 +274,32 @@ function getPublicState() {
     ...gameState,
     seats: gameState.seats.map(s => {
       if (!s) return null;
-      // 如果亮牌，显示 slots 和 hand；否则隐藏
-      // 注意：这里我们假设亮牌后，牌槽和剩余手牌都展示
+      
+      // 构造 slots 数据：
+      // 如果全亮 (isShowing) 或者 该道在 shownSlots 里，则显示真实数据
+      // 否则显示空数组（前端渲染为牌背）
+      const publicSlots: any = { 1: [], 2: [], 3: [] };
+      for (let i = 1; i <= 3; i++) {
+        const isSlotShown = s.isShowing || (s.shownSlots && s.shownSlots.includes(i));
+        if (isSlotShown) {
+          publicSlots[i] = s.slots[i];
+        } else {
+          // 隐藏状态：只告诉前端有几张牌，不给具体内容
+          // 但为了简单，我们这里给空数组，前端根据 length 渲染牌背
+          // 注意：为了让前端知道有几张牌背，我们需要构造假对象或者只传长度
+          // 这里为了兼容现有前端逻辑，我们传输一个“带长度的空数组”或者“假卡牌”
+          // 最简单的做法：直接传真实数据，但把 rank/suit 抹掉？
+          // 不，为了安全，我们只传占位符
+          publicSlots[i] = new Array(s.slots[i].length).fill({ id: 'hidden' }); 
+        }
+      }
+
       return { 
         ...s, 
         hand: s.isShowing ? s.hand : null,
-        slots: s.isShowing ? s.slots : { 1: [], 2: [], 3: [] }
+        slots: publicSlots,
+        // 把 shownSlots 也传给前端，用于 UI 判断是否高亮
+        shownSlots: s.shownSlots || []
       };
     })
   };
