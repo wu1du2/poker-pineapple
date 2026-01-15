@@ -32,12 +32,14 @@ interface GameState {
   seats: (Player | null)[];
   communityCards: Card[];
   dealerIndex: number;
+  billboard: string; // 新增
 }
 
 const gameState = reactive<GameState>({
-  seats: new Array(9).fill(null),
+  seats: new Array(6).fill(null), // 6人座
   communityCards: [],
-  dealerIndex: -1
+  dealerIndex: -1,
+  billboard: ''
 });
 
 onMounted(() => {
@@ -69,6 +71,13 @@ const updateMyName = (e: Event) => {
   }
 };
 
+// --- 公告板逻辑 ---
+const updateBillboard = (e: Event) => {
+  const input = e.target as HTMLTextAreaElement;
+  socket.emit('update-billboard', input.value);
+};
+
+// --- 积分榜逻辑 ---
 const handleScoreboardNameChange = (e: Event, seatIndex: number) => {
   const input = e.target as HTMLInputElement;
   socket.emit('update-name', { seatIndex, name: input.value });
@@ -77,6 +86,28 @@ const handleScoreboardNameChange = (e: Event, seatIndex: number) => {
 const handleScoreboardScoreChange = (e: Event, seatIndex: number) => {
   const input = e.target as HTMLInputElement;
   socket.emit('update-score', { seatIndex, score: input.value });
+};
+
+// 加分逻辑
+const handleScoreAdd = (e: Event, seatIndex: number, currentScore: number) => {
+  const input = e.target as HTMLInputElement;
+  const val = parseInt(input.value);
+  if (!isNaN(val) && val !== 0) {
+    socket.emit('update-score', { seatIndex, score: currentScore + val });
+    input.value = ''; // 清空输入框
+    input.blur();
+  }
+};
+
+// 减分逻辑
+const handleScoreSub = (e: Event, seatIndex: number, currentScore: number) => {
+  const input = e.target as HTMLInputElement;
+  const val = parseInt(input.value);
+  if (!isNaN(val) && val !== 0) {
+    socket.emit('update-score', { seatIndex, score: currentScore - val });
+    input.value = ''; // 清空输入框
+    input.blur();
+  }
 };
 
 const fold = () => {
@@ -129,8 +160,10 @@ const clickSlotCard = (card: Card) => {
   socket.emit('move-card', { seatIndex: mySeatIndex.value, cardId: card.id, target: 'hand' });
 };
 
+// --- 修改：6人座椭圆分布 ---
 const getSeatStyle = (index: number) => {
-  const angleDeg = (index * 40) + 90; 
+  // 6人座，每人间隔 60 度
+  const angleDeg = (index * 60) + 90; 
   const angleRad = angleDeg * Math.PI / 180;
   const rx = 540; 
   const ry = 330; 
@@ -144,32 +177,45 @@ const getSeatStyle = (index: number) => {
   <div class="table-container">
     <button class="fixed-reset-btn" @click="handleHardReset">⚠ 重置服务</button>
 
+    <!-- 新增：左上角公告板 -->
+    <div class="billboard-container">
+      <textarea 
+        class="billboard-text" 
+        :value="gameState.billboard"
+        @input="updateBillboard"
+        placeholder="在此输入公告..."
+      ></textarea>
+    </div>
+
+    <!-- 积分榜：新增加减列 -->
     <div class="scoreboard">
-      <h3>积分榜 (可编辑)</h3>
+      <h3>积分榜 (Enter确认)</h3>
       <table>
         <thead>
           <tr>
-            <th style="width: 60%">玩家</th>
-            <th style="width: 40%">得分</th>
+            <th style="width: 30%">玩家</th>
+            <th style="width: 20%">总分</th>
+            <th style="width: 25%; color: #69f0ae;">加分(+)</th>
+            <th style="width: 25%; color: #ff5252;">减分(-)</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(seat, idx) in gameState.seats" :key="idx">
             <template v-if="seat">
               <td>
-                <input 
-                  class="sb-input sb-name"
-                  :value="seat.name" 
-                  @change="(e) => handleScoreboardNameChange(e, idx)"
-                />
+                <input class="sb-input sb-name" :value="seat.name" @change="(e) => handleScoreboardNameChange(e, idx)" />
               </td>
               <td>
-                <input 
-                  type="number" 
-                  class="sb-input sb-score"
-                  :value="seat.score" 
-                  @change="(e) => handleScoreboardScoreChange(e, idx)"
-                />
+                <!-- 总分依然可直接编辑 -->
+                <input type="number" class="sb-input sb-score" :value="seat.score" @change="(e) => handleScoreboardScoreChange(e, idx)" />
+              </td>
+              <td>
+                <!-- 加分输入框 -->
+                <input type="number" class="sb-input sb-op" placeholder="+" @change="(e) => handleScoreAdd(e, idx, seat.score)" />
+              </td>
+              <td>
+                <!-- 减分输入框 -->
+                <input type="number" class="sb-input sb-op" placeholder="-" @change="(e) => handleScoreSub(e, idx, seat.score)" />
               </td>
             </template>
           </tr>
@@ -181,13 +227,12 @@ const getSeatStyle = (index: number) => {
       
       <div class="center-area">
         <div class="board">
-          <!-- 公共牌：56px (原尺寸) -->
           <PokerCard v-for="c in gameState.communityCards" :key="c.id" :card="c" width="56px" />
         </div>
         
         <div class="admin-controls">
-          <button @click="control('new-game')">新开局</button>
-          <button @click="control('deal-flop')">翻牌</button>
+          <button @click="control('new-game')">新开局(自动翻牌)</button>
+          <!-- 移除了单独的翻牌按钮，因为新开局自动翻了 -->
           <button @click="control('deal-turn')">转牌</button>
           <button @click="control('deal-river')">河牌</button>
         </div>
@@ -220,7 +265,6 @@ const getSeatStyle = (index: number) => {
 
               <div class="slot-cards">
                 <template v-if="index === mySeatIndex">
-                   <!-- Slot 牌：35px -->
                    <PokerCard 
                     v-for="c in mySlots[i]" 
                     :key="c.id" 
@@ -234,7 +278,6 @@ const getSeatStyle = (index: number) => {
                 <template v-else>
                   <template v-for="(c, k) in (seat.slots[i] || [])" :key="k">
                     <div v-if="c.id === 'hidden'" class="card-back-xs"></div>
-                    <!-- Slot 牌：35px -->
                     <PokerCard v-else :card="c" width="35px" />
                   </template>
                 </template>
@@ -259,7 +302,6 @@ const getSeatStyle = (index: number) => {
 
             <div class="hand" :class="{ 'folded': seat.isFolded }">
               <template v-if="index === mySeatIndex">
-                 <!-- 手牌：45px -->
                  <PokerCard v-for="c in myHand" 
                             :key="c.id" :card="c" width="45px" 
                             @click="clickHandCard(c)"
@@ -267,7 +309,6 @@ const getSeatStyle = (index: number) => {
                             class="hover-card" />
               </template>
               <template v-else-if="seat.isShowing && seat.hand">
-                 <!-- 手牌：45px -->
                  <PokerCard v-for="c in seat.hand" :key="c.id" :card="c" width="45px" />
               </template>
               <template v-else>
@@ -309,6 +350,34 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .fixed-reset-btn { position: fixed; top: 15px; left: 15px; z-index: 1000; background: #b71c1c; color: #ffcdd2; border: 1px solid #e53935; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
 .fixed-reset-btn:hover { background: #d32f2f; transform: scale(1.05); }
 
+/* 公告板样式 */
+.billboard-container {
+  position: fixed;
+  top: 15px;
+  left: 150px; /* 避开重置按钮 */
+  z-index: 900;
+}
+.billboard-text {
+  background: transparent;
+  border: 2px dashed rgba(255, 215, 0, 0.3);
+  color: #ffd700;
+  font-size: 2em;
+  font-weight: bold;
+  width: 400px;
+  height: 100px;
+  resize: both;
+  padding: 10px;
+  font-family: "Microsoft YaHei", sans-serif;
+  text-shadow: 2px 2px 0 #000;
+  overflow: hidden;
+}
+.billboard-text:focus {
+  outline: none;
+  border-color: rgba(255, 215, 0, 0.8);
+  background: rgba(0,0,0,0.2);
+}
+
+/* 积分榜样式 */
 .scoreboard {
   position: fixed;
   top: 15px;
@@ -318,12 +387,12 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   border-radius: 8px;
   border: 1px solid #555;
   z-index: 1000;
-  min-width: 220px;
+  min-width: 300px; /* 加宽 */
   box-shadow: 0 5px 15px rgba(0,0,0,0.5);
 }
 .scoreboard h3 { margin: 0 0 10px 0; font-size: 1em; color: #ffd700; text-align: center; border-bottom: 1px solid #444; padding-bottom: 5px; }
 .scoreboard table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
-.scoreboard th { text-align: left; color: #aaa; padding-bottom: 5px; font-weight: normal; }
+.scoreboard th { text-align: center; color: #aaa; padding-bottom: 5px; font-weight: normal; }
 .scoreboard td { padding: 4px 2px; }
 
 .sb-input {
@@ -335,10 +404,12 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   font-family: inherit;
   font-size: 0.9em;
   transition: border-color 0.2s;
+  text-align: center;
 }
 .sb-input:focus { outline: none; border-color: #2196f3; background: #333; }
-.sb-name { width: 100%; box-sizing: border-box; }
-.sb-score { width: 50px; text-align: center; }
+.sb-name { width: 100%; box-sizing: border-box; text-align: left; }
+.sb-score { width: 50px; font-weight: bold; color: #fff; }
+.sb-op { width: 40px; } /* 加减分输入框较小 */
 
 .seat-wrapper { position: absolute; top: 50%; left: 50%; width: 160px; height: 340px; margin-left: -80px; margin-top: -170px; display: flex; justify-content: center; align-items: center; pointer-events: none; }
 .seat-wrapper > * { pointer-events: auto; }
@@ -350,7 +421,6 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .info { display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 20; text-shadow: 0 0 5px black; }
 .hand { display: flex; gap: 4px; margin-top: 2px; height: 65px; align-items: center; position: relative; }
 
-/* 修改：牌背尺寸增大 */
 .card-back-sm { width: 45px; height: 62px; background: #3b4a8c; border: 2px solid white; border-radius: 4px; }
 .card-back-xs { width: 35px; height: 48px; background: #3b4a8c; border: 2px solid white; border-radius: 3px; }
 
@@ -391,7 +461,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   border-radius: 4px; 
   padding: 1px;
   width: 100%;
-  min-height: 45px; /* 增大最小高度 */
+  min-height: 45px; 
 }
 .slot-left {
   display: flex;

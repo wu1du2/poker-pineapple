@@ -32,10 +32,15 @@ class Deck {
 }
 
 const deck = new Deck();
+
+// --- 修改：座位数改为 6 ---
+const SEAT_COUNT = 6;
+
 const gameState = {
-  seats: new Array(9).fill(null) as any[],
+  seats: new Array(SEAT_COUNT).fill(null) as any[],
   communityCards: [] as any[],
   dealerIndex: -1,
+  billboard: "公告板 (点击编辑)", // 新增：公告板内容
   phase: 'PREFLOP'
 };
 
@@ -48,7 +53,7 @@ io.on('connection', (socket: Socket) => {
       gameState.seats[seatIndex] = {
         id: socket.id,
         name,
-        score: 0, // 新增：初始积分
+        score: 0, 
         hand: [], 
         slots: { 1: [], 2: [], 3: [] },
         shownSlots: [],
@@ -68,17 +73,21 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // --- 新增：更新积分事件 ---
   socket.on('update-score', ({ seatIndex, score }) => {
     const p = gameState.seats[seatIndex];
     if (p) {
-      // 允许输入负数，转换失败则保持原值
       const val = parseInt(score);
       if (!isNaN(val)) {
         p.score = val;
         io.emit('update', getPublicState());
       }
     }
+  });
+
+  // --- 新增：更新公告板 ---
+  socket.on('update-billboard', (text) => {
+    gameState.billboard = text;
+    io.emit('update', getPublicState());
   });
 
   socket.on('fold', ({ seatIndex }) => {
@@ -162,9 +171,9 @@ io.on('connection', (socket: Socket) => {
       let nextIdx = gameState.dealerIndex;
       let loopCount = 0;
       do {
-        nextIdx = (nextIdx + 1) % 9;
+        nextIdx = (nextIdx + 1) % SEAT_COUNT;
         loopCount++;
-      } while (!gameState.seats[nextIdx] && loopCount < 9);
+      } while (!gameState.seats[nextIdx] && loopCount < SEAT_COUNT);
       if (gameState.seats[nextIdx]) gameState.dealerIndex = nextIdx;
 
       gameState.seats.forEach(p => {
@@ -177,9 +186,14 @@ io.on('connection', (socket: Socket) => {
           p.isShowing = false;
         }
       });
+
+      // --- 修改：新开局自动发翻牌 (3张) ---
+      gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+
       io.emit('update', getPublicState());
     } 
     else if (action === 'deal-flop') {
+      // 兼容旧按钮，虽然新开局已经发了，但保留手动功能
       gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
       io.emit('update', getPublicState());
     }
@@ -195,7 +209,8 @@ io.on('connection', (socket: Socket) => {
       deck.reset();
       gameState.communityCards = [];
       gameState.dealerIndex = -1;
-      gameState.seats = new Array(9).fill(null);
+      gameState.seats = new Array(SEAT_COUNT).fill(null);
+      gameState.billboard = "公告板 (点击编辑)";
       io.emit('update', getPublicState());
       io.emit('force-reload');
     }
