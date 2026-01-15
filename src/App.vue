@@ -10,6 +10,14 @@ const mySeatIndex = ref(-1);
 const myHand = ref<any[]>([]);
 const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
 
+// 临时存储积分榜的输入状态：双列输入
+const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
+
+// Slot 倍率配置
+const slotMultipliers: { [key: number]: string } = { 1: '5倍', 2: '3倍', 3: '1倍' };
+// 倍率颜色配置
+const multiplierColors: { [key: number]: string } = { 1: '#ff5252', 2: '#ffd700', 3: '#69f0ae' };
+
 interface Card {
   suit: string;
   rank: string;
@@ -32,11 +40,11 @@ interface GameState {
   seats: (Player | null)[];
   communityCards: Card[];
   dealerIndex: number;
-  billboard: string; // 新增
+  billboard: string;
 }
 
 const gameState = reactive<GameState>({
-  seats: new Array(6).fill(null), // 6人座
+  seats: new Array(6).fill(null),
   communityCards: [],
   dealerIndex: -1,
   billboard: ''
@@ -71,13 +79,11 @@ const updateMyName = (e: Event) => {
   }
 };
 
-// --- 公告板逻辑 ---
 const updateBillboard = (e: Event) => {
   const input = e.target as HTMLTextAreaElement;
   socket.emit('update-billboard', input.value);
 };
 
-// --- 积分榜逻辑 ---
 const handleScoreboardNameChange = (e: Event, seatIndex: number) => {
   const input = e.target as HTMLInputElement;
   socket.emit('update-name', { seatIndex, name: input.value });
@@ -88,26 +94,22 @@ const handleScoreboardScoreChange = (e: Event, seatIndex: number) => {
   socket.emit('update-score', { seatIndex, score: input.value });
 };
 
-// 加分逻辑
-const handleScoreAdd = (e: Event, seatIndex: number, currentScore: number) => {
-  const input = e.target as HTMLInputElement;
-  const val = parseInt(input.value);
-  if (!isNaN(val) && val !== 0) {
-    socket.emit('update-score', { seatIndex, score: currentScore + val });
-    input.value = ''; // 清空输入框
-    input.blur();
-  }
-};
+// --- 修复：双列积分计算逻辑 ---
+const confirmScoreChange = (seatIndex: number, currentScore: number) => {
+  const inputs = scoreInputs[seatIndex];
+  if (!inputs) return;
 
-// 减分逻辑
-const handleScoreSub = (e: Event, seatIndex: number, currentScore: number) => {
-  const input = e.target as HTMLInputElement;
-  const val = parseInt(input.value);
-  if (!isNaN(val) && val !== 0) {
-    socket.emit('update-score', { seatIndex, score: currentScore - val });
-    input.value = ''; // 清空输入框
-    input.blur();
-  }
+  const addVal = parseInt(inputs.add) || 0;
+  const subVal = parseInt(inputs.sub) || 0;
+
+  if (addVal === 0 && subVal === 0) return;
+
+  const newScore = currentScore + addVal - subVal;
+  socket.emit('update-score', { seatIndex, score: newScore });
+
+  // 清空输入框
+  inputs.add = '';
+  inputs.sub = '';
 };
 
 const fold = () => {
@@ -160,9 +162,7 @@ const clickSlotCard = (card: Card) => {
   socket.emit('move-card', { seatIndex: mySeatIndex.value, cardId: card.id, target: 'hand' });
 };
 
-// --- 修改：6人座椭圆分布 ---
 const getSeatStyle = (index: number) => {
-  // 6人座，每人间隔 60 度
   const angleDeg = (index * 60) + 90; 
   const angleRad = angleDeg * Math.PI / 180;
   const rx = 540; 
@@ -177,7 +177,6 @@ const getSeatStyle = (index: number) => {
   <div class="table-container">
     <button class="fixed-reset-btn" @click="handleHardReset">⚠ 重置服务</button>
 
-    <!-- 新增：左上角公告板 -->
     <div class="billboard-container">
       <textarea 
         class="billboard-text" 
@@ -187,16 +186,17 @@ const getSeatStyle = (index: number) => {
       ></textarea>
     </div>
 
-    <!-- 积分榜：新增加减列 -->
+    <!-- 积分榜：双列输入 + 回车确认 -->
     <div class="scoreboard">
-      <h3>积分榜 (Enter确认)</h3>
+      <h3>积分榜</h3>
       <table>
         <thead>
           <tr>
-            <th style="width: 30%">玩家</th>
-            <th style="width: 20%">总分</th>
-            <th style="width: 25%; color: #69f0ae;">加分(+)</th>
-            <th style="width: 25%; color: #ff5252;">减分(-)</th>
+            <th style="width: 25%">玩家</th>
+            <th style="width: 15%">总分</th>
+            <th style="width: 20%; color: #69f0ae;">变动+</th>
+            <th style="width: 20%; color: #ff5252;">变动-</th>
+            <th style="width: 20%">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -206,16 +206,34 @@ const getSeatStyle = (index: number) => {
                 <input class="sb-input sb-name" :value="seat.name" @change="(e) => handleScoreboardNameChange(e, idx)" />
               </td>
               <td>
-                <!-- 总分依然可直接编辑 -->
                 <input type="number" class="sb-input sb-score" :value="seat.score" @change="(e) => handleScoreboardScoreChange(e, idx)" />
               </td>
+              
+              <template v-if="scoreInputs[idx]">
+                <td>
+                  <!-- 加分输入框，支持回车 -->
+                  <input 
+                    type="number" 
+                    class="sb-input sb-op" 
+                    v-model="scoreInputs[idx].add" 
+                    placeholder="" 
+                    @keyup.enter="confirmScoreChange(idx, seat.score)"
+                  />
+                </td>
+                <td>
+                  <!-- 减分输入框，支持回车 -->
+                  <input 
+                    type="number" 
+                    class="sb-input sb-op" 
+                    v-model="scoreInputs[idx].sub" 
+                    placeholder="" 
+                    @keyup.enter="confirmScoreChange(idx, seat.score)"
+                  />
+                </td>
+              </template>
+              
               <td>
-                <!-- 加分输入框 -->
-                <input type="number" class="sb-input sb-op" placeholder="+" @change="(e) => handleScoreAdd(e, idx, seat.score)" />
-              </td>
-              <td>
-                <!-- 减分输入框 -->
-                <input type="number" class="sb-input sb-op" placeholder="-" @change="(e) => handleScoreSub(e, idx, seat.score)" />
+                <button class="sb-confirm-btn" @click="confirmScoreChange(idx, seat.score)">OK</button>
               </td>
             </template>
           </tr>
@@ -232,7 +250,6 @@ const getSeatStyle = (index: number) => {
         
         <div class="admin-controls">
           <button @click="control('new-game')">新开局(自动翻牌)</button>
-          <!-- 移除了单独的翻牌按钮，因为新开局自动翻了 -->
           <button @click="control('deal-turn')">转牌</button>
           <button @click="control('deal-river')">河牌</button>
         </div>
@@ -254,7 +271,10 @@ const getSeatStyle = (index: number) => {
                  :class="{ 'showdown-effect': seat.isShowing || (seat.shownSlots && seat.shownSlots.includes(i)) }">
               
               <div class="slot-left">
-                <div class="slot-label">{{ i }}</div>
+                <div class="slot-multiplier" :style="{ color: multiplierColors[i] }">
+                  {{ slotMultipliers[i] }}
+                </div>
+
                 <button v-if="index === mySeatIndex && !seat.isShowing && (!seat.shownSlots || !seat.shownSlots.includes(i))" 
                         class="slot-show-btn" 
                         @click.stop="showSlot(i)" 
@@ -350,18 +370,17 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .fixed-reset-btn { position: fixed; top: 15px; left: 15px; z-index: 1000; background: #b71c1c; color: #ffcdd2; border: 1px solid #e53935; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
 .fixed-reset-btn:hover { background: #d32f2f; transform: scale(1.05); }
 
-/* 公告板样式 */
 .billboard-container {
   position: fixed;
   top: 15px;
-  left: 150px; /* 避开重置按钮 */
+  left: 150px; 
   z-index: 900;
 }
 .billboard-text {
   background: transparent;
   border: 2px dashed rgba(255, 215, 0, 0.3);
   color: #ffd700;
-  font-size: 2em;
+  font-size: 1.5em; 
   font-weight: bold;
   width: 400px;
   height: 100px;
@@ -377,7 +396,6 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   background: rgba(0,0,0,0.2);
 }
 
-/* 积分榜样式 */
 .scoreboard {
   position: fixed;
   top: 15px;
@@ -387,13 +405,22 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   border-radius: 8px;
   border: 1px solid #555;
   z-index: 1000;
-  min-width: 300px; /* 加宽 */
+  min-width: 320px; 
   box-shadow: 0 5px 15px rgba(0,0,0,0.5);
 }
 .scoreboard h3 { margin: 0 0 10px 0; font-size: 1em; color: #ffd700; text-align: center; border-bottom: 1px solid #444; padding-bottom: 5px; }
 .scoreboard table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
 .scoreboard th { text-align: center; color: #aaa; padding-bottom: 5px; font-weight: normal; }
 .scoreboard td { padding: 4px 2px; }
+
+.sb-input::-webkit-outer-spin-button,
+.sb-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sb-input[type=number] {
+  -moz-appearance: textfield;
+}
 
 .sb-input {
   background: #222;
@@ -408,8 +435,19 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 }
 .sb-input:focus { outline: none; border-color: #2196f3; background: #333; }
 .sb-name { width: 100%; box-sizing: border-box; text-align: left; }
-.sb-score { width: 50px; font-weight: bold; color: #fff; }
-.sb-op { width: 40px; } /* 加减分输入框较小 */
+.sb-score { width: 40px; font-weight: bold; color: #fff; }
+.sb-op { width: 40px; } 
+
+.sb-confirm-btn {
+  background: #2e7d32;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 0.8em;
+}
+.sb-confirm-btn:hover { background: #43a047; }
 
 .seat-wrapper { position: absolute; top: 50%; left: 50%; width: 160px; height: 340px; margin-left: -80px; margin-top: -170px; display: flex; justify-content: center; align-items: center; pointer-events: none; }
 .seat-wrapper > * { pointer-events: auto; }
@@ -466,11 +504,17 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .slot-left {
   display: flex;
   align-items: center;
-  gap: 2px;
-  width: 25px; 
+  gap: 5px; 
+  width: 50px; 
   justify-content: flex-end;
 }
-.slot-label { font-size: 0.7em; color: #aaa; margin-bottom: 0; font-weight: bold; }
+.slot-multiplier {
+  font-size: 0.8em;
+  font-weight: 900;
+  text-shadow: 1px 1px 0 black;
+  margin-right: 2px;
+}
+
 .slot-show-btn {
   background: none; border: none; cursor: pointer; font-size: 10px; padding: 0; opacity: 0.7;
 }
