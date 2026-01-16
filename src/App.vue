@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { reactive, ref, onMounted, computed } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
 
@@ -9,13 +9,11 @@ const myName = ref('Player' + Math.floor(Math.random()*100));
 const mySeatIndex = ref(-1);
 const myHand = ref<any[]>([]);
 const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
+const userToken = ref('');
 
-// 临时存储积分榜的输入状态：双列输入
 const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
 
-// Slot 倍率配置
 const slotMultipliers: { [key: number]: string } = { 1: '5倍', 2: '3倍', 3: '1倍' };
-// 倍率颜色配置
 const multiplierColors: { [key: number]: string } = { 1: '#ff5252', 2: '#ffd700', 3: '#69f0ae' };
 
 interface Card {
@@ -50,8 +48,40 @@ const gameState = reactive<GameState>({
   billboard: ''
 });
 
+// --- 新增：计算总分 ---
+const totalScore = computed(() => {
+  return gameState.seats.reduce((sum, seat) => sum + (seat ? seat.score : 0), 0);
+});
+
+const generateToken = () => {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+};
+
 onMounted(() => {
+  const storedToken = localStorage.getItem('poker_user_token');
+  if (storedToken) {
+    userToken.value = storedToken;
+  } else {
+    userToken.value = generateToken();
+    localStorage.setItem('poker_user_token', userToken.value);
+  }
+
+  socket.on('connect', () => {
+    console.log('Connected, attempting to restore session...');
+    socket.emit('restore-session', userToken.value);
+  });
+
+  socket.on('session-restored', ({ seatIndex }) => {
+    console.log('Session restored! Seat:', seatIndex);
+    mySeatIndex.value = seatIndex;
+    socket.emit('get-my-hand', seatIndex, (data: any) => {
+      myHand.value = data.hand;
+      mySlots.value = data.slots;
+    });
+  });
+
   socket.on('init', (state) => Object.assign(gameState, state));
+  
   socket.on('update', (state) => {
     Object.assign(gameState, state);
     if (mySeatIndex.value !== -1) {
@@ -61,6 +91,7 @@ onMounted(() => {
       });
     }
   });
+
   socket.on('force-reload', () => {
     window.location.reload();
   });
@@ -68,7 +99,11 @@ onMounted(() => {
 
 const sit = (index: number) => {
   if (gameState.seats[index]) return;
-  socket.emit('sit', { name: myName.value, seatIndex: index });
+  socket.emit('sit', { 
+    name: myName.value, 
+    seatIndex: index,
+    token: userToken.value 
+  });
   mySeatIndex.value = index;
 };
 
@@ -94,7 +129,6 @@ const handleScoreboardScoreChange = (e: Event, seatIndex: number) => {
   socket.emit('update-score', { seatIndex, score: input.value });
 };
 
-// --- 修复：双列积分计算逻辑 ---
 const confirmScoreChange = (seatIndex: number, currentScore: number) => {
   const inputs = scoreInputs[seatIndex];
   if (!inputs) return;
@@ -107,16 +141,11 @@ const confirmScoreChange = (seatIndex: number, currentScore: number) => {
   const newScore = currentScore + addVal - subVal;
   socket.emit('update-score', { seatIndex, score: newScore });
 
-  // 清空输入框
   inputs.add = '';
   inputs.sub = '';
 };
 
-const fold = () => {
-  if (mySeatIndex.value !== -1) {
-    socket.emit('fold', { seatIndex: mySeatIndex.value });
-  }
-};
+// 移除了 fold 函数
 
 const showHand = () => {
   if (mySeatIndex.value !== -1) {
@@ -186,14 +215,14 @@ const getSeatStyle = (index: number) => {
       ></textarea>
     </div>
 
-    <!-- 积分榜：双列输入 + 回车确认 -->
     <div class="scoreboard">
       <h3>积分榜</h3>
       <table>
         <thead>
           <tr>
             <th style="width: 25%">玩家</th>
-            <th style="width: 15%">总分</th>
+            <!-- 修改：显示总分求和 -->
+            <th style="width: 15%">总分 <span class="total-score-sum">({{ totalScore }})</span></th>
             <th style="width: 20%; color: #69f0ae;">变动+</th>
             <th style="width: 20%; color: #ff5252;">变动-</th>
             <th style="width: 20%">操作</th>
@@ -211,7 +240,6 @@ const getSeatStyle = (index: number) => {
               
               <template v-if="scoreInputs[idx]">
                 <td>
-                  <!-- 加分输入框，支持回车 -->
                   <input 
                     type="number" 
                     class="sb-input sb-op" 
@@ -221,7 +249,6 @@ const getSeatStyle = (index: number) => {
                   />
                 </td>
                 <td>
-                  <!-- 减分输入框，支持回车 -->
                   <input 
                     type="number" 
                     class="sb-input sb-op" 
@@ -250,8 +277,8 @@ const getSeatStyle = (index: number) => {
         
         <div class="admin-controls">
           <button @click="control('new-game')">新开局(自动翻牌)</button>
-          <button @click="control('deal-turn')">转牌</button>
-          <button @click="control('deal-river')">河牌</button>
+          <!-- 修改：改名为发牌，移除河牌按钮 -->
+          <button @click="control('deal-turn')">发牌</button>
         </div>
       </div>
 
@@ -339,7 +366,7 @@ const getSeatStyle = (index: number) => {
             </div>
             
             <div class="action-btns" v-if="index === mySeatIndex">
-              <button class="fold-btn" @click="fold" title="弃牌">✕</button>
+              <!-- 移除了弃牌按钮 -->
               <button class="show-btn" @click="showHand" title="全亮">👁️</button>
             </div>
           </div>
@@ -413,6 +440,8 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .scoreboard th { text-align: center; color: #aaa; padding-bottom: 5px; font-weight: normal; }
 .scoreboard td { padding: 4px 2px; }
 
+.total-score-sum { font-size: 0.8em; color: #aaa; font-weight: normal; }
+
 .sb-input::-webkit-outer-spin-button,
 .sb-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -471,8 +500,6 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .player-score { font-size: 0.8em; color: #4fc3f7; font-weight: bold; }
 
 .action-btns { display: flex; gap: 5px; margin-top: 5px; }
-.fold-btn { background: #c62828; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: transform 0.1s; }
-.fold-btn:hover { background: #e53935; transform: scale(1.1); }
 .show-btn { background: #1976d2; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: transform 0.1s; }
 .show-btn:hover { background: #2196f3; transform: scale(1.1); }
 

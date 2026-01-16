@@ -33,25 +33,45 @@ class Deck {
 
 const deck = new Deck();
 
-// --- 修改：座位数改为 6 ---
 const SEAT_COUNT = 6;
 
 const gameState = {
   seats: new Array(SEAT_COUNT).fill(null) as any[],
   communityCards: [] as any[],
   dealerIndex: -1,
-  billboard: "公告板 (点击编辑)", // 新增：公告板内容
+  billboard: "公告板 (点击编辑)",
   phase: 'PREFLOP'
 };
 
 io.on('connection', (socket: Socket) => {
   socket.emit('init', getPublicState());
 
-  socket.on('sit', ({ name, seatIndex }) => {
+  // --- 新增：会话恢复机制 ---
+  socket.on('restore-session', (token) => {
+    if (!token) return;
+    let found = false;
+    gameState.seats.forEach((seat, index) => {
+      // 如果找到该 Token 对应的座位，更新 Socket ID
+      if (seat && seat.token === token) {
+        seat.id = socket.id; // 关键：更新为最新的 Socket ID
+        found = true;
+        // 告诉前端：你已经找回了这个座位
+        socket.emit('session-restored', { seatIndex: index });
+      }
+    });
+    if (found) {
+      console.log(`Player restored session: ${token} -> ${socket.id}`);
+      io.emit('update', getPublicState());
+    }
+  });
+
+  // --- 修改：入座时绑定 Token ---
+  socket.on('sit', ({ name, seatIndex, token }) => {
     if (!gameState.seats[seatIndex]) {
       const isFirstPlayer = gameState.seats.every(s => s === null);
       gameState.seats[seatIndex] = {
         id: socket.id,
+        token: token, // 绑定 Token
         name,
         score: 0, 
         hand: [], 
@@ -84,7 +104,6 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // --- 新增：更新公告板 ---
   socket.on('update-billboard', (text) => {
     gameState.billboard = text;
     io.emit('update', getPublicState());
@@ -92,7 +111,8 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('fold', ({ seatIndex }) => {
     const p = gameState.seats[seatIndex];
-    if (p) {
+    // 增加 ID 校验，防止旧连接操作
+    if (p && p.id === socket.id) {
       p.isFolded = true;
       io.emit('update', getPublicState());
     }
@@ -100,7 +120,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('show-hand', ({ seatIndex }) => {
     const p = gameState.seats[seatIndex];
-    if (p) {
+    if (p && p.id === socket.id) {
       p.isShowing = true; 
       io.emit('update', getPublicState());
     }
@@ -108,7 +128,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('show-slot', ({ seatIndex, slotId }) => {
     const p = gameState.seats[seatIndex];
-    if (p) {
+    if (p && p.id === socket.id) {
       if (!p.shownSlots.includes(slotId)) {
         p.shownSlots.push(slotId);
         io.emit('update', getPublicState());
@@ -118,6 +138,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('move-card', ({ seatIndex, cardId, target }) => {
     const p = gameState.seats[seatIndex];
+    // 严格校验 ID
     if (!p || p.id !== socket.id) return; 
 
     let sourceLocation = 'hand';
@@ -187,16 +208,9 @@ io.on('connection', (socket: Socket) => {
         }
       });
 
-      // --- 修改：新开局自动发翻牌 (3张) ---
       gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
-
       io.emit('update', getPublicState());
     } 
-    else if (action === 'deal-flop') {
-      // 兼容旧按钮，虽然新开局已经发了，但保留手动功能
-      gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
-      io.emit('update', getPublicState());
-    }
     else if (action === 'deal-turn') {
       gameState.communityCards.push(deck.deal());
       io.emit('update', getPublicState());
@@ -218,6 +232,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('get-my-hand', (seatIndex, callback) => {
       const p = gameState.seats[seatIndex];
+      // 这里的 p.id 已经是 restore-session 更新过的最新 ID
       if (p && p.id === socket.id) {
         callback({ hand: p.hand, slots: p.slots });
       } else {
@@ -244,6 +259,7 @@ function getPublicState() {
 
       return { 
         ...s, 
+        token: undefined, // 关键：不要把 token 广播给其他人
         hand: s.isShowing ? s.hand : null,
         slots: publicSlots,
         shownSlots: s.shownSlots || []
