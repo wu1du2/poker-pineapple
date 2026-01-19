@@ -78,7 +78,8 @@ io.on('connection', (socket: Socket) => {
         slots: { 1: [], 2: [], 3: [] },
         shownSlots: [],
         isFolded: false,
-        isShowing: false 
+        isShowing: false,
+        isReady: false 
       };
       if (isFirstPlayer) gameState.dealerIndex = seatIndex;
       io.emit('update', getPublicState());
@@ -205,6 +206,7 @@ io.on('connection', (socket: Socket) => {
           p.shownSlots = []; 
           p.isFolded = false;
           p.isShowing = false;
+          p.isReady = false;
         }
       });
 
@@ -219,7 +221,9 @@ io.on('connection', (socket: Socket) => {
       gameState.communityCards.push(deck.deal());
       io.emit('update', getPublicState());
     }
-    else if (action === 'hard-reset') {
+  });
+
+  socket.on('hard-reset', () => {
       deck.reset();
       gameState.communityCards = [];
       gameState.dealerIndex = -1;
@@ -227,8 +231,7 @@ io.on('connection', (socket: Socket) => {
       gameState.billboard = "公告板 (点击编辑)";
       io.emit('update', getPublicState());
       io.emit('force-reload');
-    }
-  });
+    });
 
   socket.on('get-my-hand', (seatIndex, callback) => {
       const p = gameState.seats[seatIndex];
@@ -238,6 +241,21 @@ io.on('connection', (socket: Socket) => {
       } else {
         callback({ hand: [], slots: { 1: [], 2: [], 3: [] } });
       }
+  });
+
+  // 新增：处理Ready事件
+  socket.on('ready', ({ seatIndex, ready }) => {
+    const p = gameState.seats[seatIndex];
+    if (p && p.id === socket.id) {
+      p.isReady = ready;
+      io.emit('update', getPublicState());
+      
+      // 检查所有玩家是否都Ready
+      const allReady = gameState.seats.every(seat => seat === null || seat.isReady);
+      if (allReady) {
+        io.emit('all-players-ready');
+      }
+    }
   });
 });
 
