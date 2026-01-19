@@ -154,14 +154,12 @@ interface Player {
 interface GameState {
   seats: (Player | null)[];
   communityCards: Card[];
-  dealerIndex: number;
   billboard: string;
 }
 
 const gameState = reactive<GameState>({
   seats: new Array(6).fill(null),
   communityCards: [],
-  dealerIndex: -1,
   billboard: ''
 });
 
@@ -475,8 +473,7 @@ const getSeatStyle = (index: number) => {
         
         <div v-else class="player-seat" 
              :class="{ 
-               'is-me': index === mySeatIndex, 
-               'is-dealer': gameState.dealerIndex === index 
+               'is-me': index === mySeatIndex 
              }">
 
           <div class="slots-container">
@@ -527,7 +524,6 @@ const getSeatStyle = (index: number) => {
 
           <div class="info">
             <div class="name-row">
-              <span v-if="gameState.dealerIndex === index" class="d-btn">D</span>
               <input 
                 v-if="index === mySeatIndex" 
                 class="name-input"
@@ -676,7 +672,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .empty-seat { width: 60px; height: 60px; border-radius: 50%; border: 2px dashed #666; display: flex; justify-content: center; align-items: center; cursor: pointer; color: #888; }
 .player-seat { display: flex; flex-direction: column; align-items: center; position: relative; width: 100%; height: 100%; justify-content: space-between; }
 
-.is-dealer { border: 3px solid #ffd700; border-radius: 12px; box-shadow: 0 0 20px rgba(255, 215, 0, 0.4); background-color: rgba(0, 0, 0, 0.2); padding: 5px; margin: -5px; }
+
 
 .info { display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 20; text-shadow: 0 0 5px black; }
 .hand { display: flex; gap: 4px; margin-top: 2px; height: 65px; align-items: center; position: relative; }
@@ -686,7 +682,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 
 .folded { filter: grayscale(100%); opacity: 0.6; }
 .fold-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: #ff5252; font-weight: 900; font-size: 1.2em; text-shadow: 1px 1px 0 black; transform: rotate(-15deg); pointer-events: none; }
-.d-btn { background: white; color: black; border-radius: 50%; width: 20px; height: 20px; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 0.8em; margin-right: 5px; box-shadow: 0 0 5px white; }
+
 .name-row { display: flex; align-items: center; justify-content: center; height: 24px; }
 .name-input { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; width: 80px; padding: 2px 5px; border-radius: 4px; font-size: 0.9em; text-align: center; }
 .name-input:focus { background: rgba(0,0,0,0.8); outline: none; border-color: #ffd700; }
