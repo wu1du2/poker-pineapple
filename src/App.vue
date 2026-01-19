@@ -31,25 +31,21 @@ const RANK_VALUE: { [key: string]: number } = {
 function calculateHandScore(cards: CardInput[]): number {
   if (cards.length !== 5) return 0;
 
-  // 1. 预处理：确保 map 返回 number，并过滤掉潜在的 undefined
   const values = cards
     .map(c => RANK_VALUE[c.rank] || 0)
     .sort((a, b) => b - a);
     
-  // 2. 安全访问 cards[0]
   const firstSuit = cards[0]?.suit;
   const isFlush = firstSuit ? cards.every(c => c.suit === firstSuit) : false;
   
   let isStraight = true;
   for (let i = 0; i < 4; i++) {
-    // --- 修复点：使用 ?? 0 解决 TS2532 报错 ---
     if ((values[i] ?? 0) - (values[i + 1] ?? 0) !== 1) {
       isStraight = false;
       break;
     }
   }
   
-  // 特殊顺子 A-5 (Wheel)
   if (!isStraight && values[0] === 14 && values[1] === 5 && values[2] === 4 && values[3] === 3 && values[4] === 2) {
     isStraight = true;
     values[0] = 5; values[1] = 4; values[2] = 3; values[3] = 2; values[4] = 1; 
@@ -62,7 +58,6 @@ function calculateHandScore(cards: CardInput[]): number {
 
   const groups = Object.keys(counts).map(k => ({ val: parseInt(k), count: counts[parseInt(k)] }));
   
-  // 3. 安全访问 count 属性
   groups.sort((a, b) => {
     const countA = a?.count || 0;
     const countB = b?.count || 0;
@@ -73,7 +68,6 @@ function calculateHandScore(cards: CardInput[]): number {
   let category = 1;
   let sortedValues = values; 
 
-  // 辅助函数：安全获取 groups 的值
   const g = (idx: number) => groups[idx] ? groups[idx].val : 0;
   const c = (idx: number) => groups[idx] ? groups[idx].count : 0;
 
@@ -131,6 +125,8 @@ const userToken = ref('');
 
 // 存储计算结果
 const calculatedResults = reactive<{ [key: number]: { [slotId: number]: string } }>({});
+// 新增：存储获胜的 Slot。Key: seatIndex, Value: Array of winning slot IDs (e.g. [1, 3])
+const winningSlots = reactive<{ [key: number]: number[] }>({});
 
 const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
 
@@ -277,6 +273,11 @@ const showSlot = (slotId: number) => {
 
 const control = (action: string) => socket.emit('control', action);
 
+// --- 新增：判断是否是胜者 ---
+const isWinner = (seatIndex: number, slotId: number) => {
+  return winningSlots[seatIndex] && winningSlots[seatIndex].includes(slotId);
+};
+
 const calculateAllScores = () => {
   const community = gameState.communityCards;
   if (community.length < 3) {
@@ -284,6 +285,15 @@ const calculateAllScores = () => {
     return;
   }
 
+  // 清空之前的获胜状态
+  Object.keys(winningSlots).forEach(key => delete winningSlots[parseInt(key)]);
+
+  // 临时存储所有人的分数： { [slotId]: [ { seatIndex, score } ] }
+  const slotScores: { [key: number]: { seatIndex: number, score: number }[] } = {
+    1: [], 2: [], 3: []
+  };
+
+  // 1. 计算每个人的分数
   gameState.seats.forEach((seat, idx) => {
     if (!seat) return;
     
@@ -299,12 +309,43 @@ const calculateAllScores = () => {
         const pool = [...community, ...visibleCards];
         const res = calculateHandScore5of7(pool);
         const catName = HandCategoryName[res.category] || '高牌';
+        
+        // 显示结果
         calculatedResults[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
+        
+        // 收集分数用于比较
+        const slotScore = slotScores[i];
+        if (slotScore) {
+          slotScore.push({ seatIndex: idx, score: res.score });
+        }
       } else {
         calculatedResults[idx][i] = '';
       }
     }
   });
+
+  // 2. 比较分数，找出每个 Slot 的胜者
+  for (let i = 1; i <= 3; i++) {
+    const scores = slotScores[i];
+    if (!scores || scores.length === 0) continue;
+
+    // 找出最大分
+    const maxScore = Math.max(...scores.map(s => s.score));
+    
+    // 找出所有等于最大分的人
+    const winners = scores.filter(s => s.score === maxScore);
+
+    // 标记胜者
+    winners.forEach(w => {
+      const seatIndex = w.seatIndex;
+      let winningSlot = winningSlots[seatIndex];
+      if (!winningSlot) {
+        winningSlot = [];
+        winningSlots[seatIndex] = winningSlot;
+      }
+      winningSlot.push(i);
+    });
+  }
 };
 
 const handleHardReset = () => {
@@ -440,7 +481,10 @@ const getSeatStyle = (index: number) => {
 
           <div class="slots-container">
             <div v-for="i in 3" :key="i" class="slot-box" 
-                 :class="{ 'showdown-effect': seat.isShowing || (seat.shownSlots && seat.shownSlots.includes(i)) }">
+                 :class="{ 
+                   'showdown-effect': seat.isShowing || (seat.shownSlots && seat.shownSlots.includes(i)),
+                   'winner-slot': isWinner(index, i) 
+                 }">
               
               <div class="slot-left">
                 <div class="slot-multiplier" :style="{ color: multiplierColors[i] }">
@@ -712,6 +756,39 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   animation: pulse 1.5s infinite;
   background: rgba(33, 150, 243, 0.1);
 }
+
+.winner-slot {
+  /* 1. 边框：实心，加粗，深金色，不再变化 */
+  border: 2px solid #ffd700 !important;
+  /* 2. 背景：使用渐变背景，模拟金属质感 */
+  /* 从左上到右下：透明 -> 亮金(反光) -> 透明 */
+  background: linear-gradient(
+    120deg, 
+    rgba(255, 215, 0, 0.1) 30%, 
+    rgba(255, 255, 255, 0.4) 50%, 
+    rgba(255, 215, 0, 0.1) 70%
+  ) !important;
+  /* 拉大背景尺寸，以便让它动起来 */
+  background-size: 200% 100% !important;
+  /* 3. 阴影：多层叠加，制造“浮起”和“发光”的立体感，但不闪烁 */
+  box-shadow: 
+    0 0 0 1px #b8860b, /* 最内圈深色描边，增加锐度 */
+    0 0 15px rgba(255, 215, 0, 0.6), /* 中圈金色光晕 */
+    inset 0 0 20px rgba(255, 215, 0, 0.2) /* 内发光，照亮内部牌 */
+    !important;
+  /* 4. 动画：只移动背景位置，产生扫光效果 */
+  animation: shine-sweep 3s linear infinite;
+}
+
+@keyframes shine-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 @keyframes pulse {
   0% { box-shadow: 0 0 10px #2196f3; }
   50% { box-shadow: 0 0 20px #64b5f6; }
