@@ -5,11 +5,132 @@ import PokerCard from './components/PokerCard.vue';
 
 const socket = io(); 
 
+// --- 移植的核心算法 (最终修复版) ---
+interface CardInput {
+  suit: string;
+  rank: string;
+}
+
+const HandCategoryName: { [key: number]: string } = {
+  1: '高牌',
+  2: '一对',
+  3: '两对',
+  4: '三条',
+  5: '顺子',
+  6: '同花',
+  7: '葫芦',
+  8: '四条',
+  9: '同花顺'
+};
+
+const RANK_VALUE: { [key: string]: number } = {
+  '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
+  'J': 11, 'Q': 12, 'K': 13, 'A': 14
+};
+
+function calculateHandScore(cards: CardInput[]): number {
+  if (cards.length !== 5) return 0;
+
+  // 1. 预处理：确保 map 返回 number，并过滤掉潜在的 undefined
+  const values = cards
+    .map(c => RANK_VALUE[c.rank] || 0)
+    .sort((a, b) => b - a);
+    
+  // 2. 安全访问 cards[0]
+  const firstSuit = cards[0]?.suit;
+  const isFlush = firstSuit ? cards.every(c => c.suit === firstSuit) : false;
+  
+  let isStraight = true;
+  for (let i = 0; i < 4; i++) {
+    // --- 修复点：使用 ?? 0 解决 TS2532 报错 ---
+    if ((values[i] ?? 0) - (values[i + 1] ?? 0) !== 1) {
+      isStraight = false;
+      break;
+    }
+  }
+  
+  // 特殊顺子 A-5 (Wheel)
+  if (!isStraight && values[0] === 14 && values[1] === 5 && values[2] === 4 && values[3] === 3 && values[4] === 2) {
+    isStraight = true;
+    values[0] = 5; values[1] = 4; values[2] = 3; values[3] = 2; values[4] = 1; 
+  }
+
+  const counts: { [key: number]: number } = {};
+  values.forEach(v => { 
+    counts[v] = (counts[v] || 0) + 1; 
+  });
+
+  const groups = Object.keys(counts).map(k => ({ val: parseInt(k), count: counts[parseInt(k)] }));
+  
+  // 3. 安全访问 count 属性
+  groups.sort((a, b) => {
+    const countA = a?.count || 0;
+    const countB = b?.count || 0;
+    if (countB !== countA) return countB - countA;
+    return (b?.val || 0) - (a?.val || 0);
+  });
+
+  let category = 1;
+  let sortedValues = values; 
+
+  // 辅助函数：安全获取 groups 的值
+  const g = (idx: number) => groups[idx] ? groups[idx].val : 0;
+  const c = (idx: number) => groups[idx] ? groups[idx].count : 0;
+
+  if (isFlush && isStraight) { category = 9; sortedValues = values; }
+  else if (c(0) === 4) { category = 8; sortedValues = [g(0), g(1), 0, 0, 0]; }
+  else if (c(0) === 3 && c(1) === 2) { category = 7; sortedValues = [g(0), g(1), 0, 0, 0]; }
+  else if (isFlush) { category = 6; sortedValues = values; }
+  else if (isStraight) { category = 5; sortedValues = values; }
+  else if (c(0) === 3) { category = 4; sortedValues = [g(0), g(1), g(2), 0, 0]; }
+  else if (c(0) === 2 && c(1) === 2) { category = 3; sortedValues = [g(0), g(1), g(2), 0, 0]; }
+  else if (c(0) === 2) { category = 2; sortedValues = [g(0), g(1), g(2), g(3), 0]; }
+  else { category = 1; sortedValues = values; }
+
+  let score = category << 20;
+  score |= (sortedValues[0] || 0) << 16;
+  score |= (sortedValues[1] || 0) << 12;
+  score |= (sortedValues[2] || 0) << 8;
+  score |= (sortedValues[3] || 0) << 4;
+  score |= (sortedValues[4] || 0);
+
+  return score;
+}
+
+function calculateHandScore5of7(cards: CardInput[]): { score: number, category: number } {
+  if (cards.length < 5) return { score: 0, category: 0 };
+  
+  let maxScore = -1;
+  
+  const combine = (source: any[], count: number): any[][] => {
+      if (count === 0) return [[]];
+      if (source.length === 0) return [];
+      const [first, ...rest] = source;
+      const withFirst = combine(rest, count - 1).map(c => [first, ...c]);
+      const withoutFirst = combine(rest, count);
+      return [...withFirst, ...withoutFirst];
+  };
+
+  const combinations = combine(cards, 5);
+  
+  for (const comb of combinations) {
+    const s = calculateHandScore(comb);
+    if (s > maxScore) maxScore = s;
+  }
+
+  return { score: maxScore, category: maxScore >> 20 };
+}
+// --- 移植的核心算法 (结束) ---
+
+
 const myName = ref('Player' + Math.floor(Math.random()*100));
 const mySeatIndex = ref(-1);
 const myHand = ref<any[]>([]);
 const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
 const userToken = ref('');
+
+// 存储计算结果
+const calculatedResults = reactive<{ [key: number]: { [slotId: number]: string } }>({});
 
 const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
 
@@ -48,7 +169,6 @@ const gameState = reactive<GameState>({
   billboard: ''
 });
 
-// --- 新增：计算总分 ---
 const totalScore = computed(() => {
   return gameState.seats.reduce((sum, seat) => sum + (seat ? seat.score : 0), 0);
 });
@@ -67,12 +187,10 @@ onMounted(() => {
   }
 
   socket.on('connect', () => {
-    console.log('Connected, attempting to restore session...');
     socket.emit('restore-session', userToken.value);
   });
 
   socket.on('session-restored', ({ seatIndex }) => {
-    console.log('Session restored! Seat:', seatIndex);
     mySeatIndex.value = seatIndex;
     socket.emit('get-my-hand', seatIndex, (data: any) => {
       myHand.value = data.hand;
@@ -145,8 +263,6 @@ const confirmScoreChange = (seatIndex: number, currentScore: number) => {
   inputs.sub = '';
 };
 
-// 移除了 fold 函数
-
 const showHand = () => {
   if (mySeatIndex.value !== -1) {
     socket.emit('show-hand', { seatIndex: mySeatIndex.value });
@@ -160,6 +276,36 @@ const showSlot = (slotId: number) => {
 };
 
 const control = (action: string) => socket.emit('control', action);
+
+const calculateAllScores = () => {
+  const community = gameState.communityCards;
+  if (community.length < 3) {
+    alert("公共牌不足，无法计算！");
+    return;
+  }
+
+  gameState.seats.forEach((seat, idx) => {
+    if (!seat) return;
+    
+    const targetSlots = (idx === mySeatIndex.value) ? mySlots.value : seat.slots;
+    
+    if (!calculatedResults[idx]) calculatedResults[idx] = {};
+
+    for (let i = 1; i <= 3; i++) {
+      const slotCards = targetSlots[i] || [];
+      const visibleCards = slotCards.filter((c: any) => c.id !== 'hidden');
+      
+      if (visibleCards.length === 2) {
+        const pool = [...community, ...visibleCards];
+        const res = calculateHandScore5of7(pool);
+        const catName = HandCategoryName[res.category] || '高牌';
+        calculatedResults[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
+      } else {
+        calculatedResults[idx][i] = '';
+      }
+    }
+  });
+};
 
 const handleHardReset = () => {
   const pwd = prompt("【危险操作】请输入管理员密码以重置服务：");
@@ -221,7 +367,6 @@ const getSeatStyle = (index: number) => {
         <thead>
           <tr>
             <th style="width: 25%">玩家</th>
-            <!-- 修改：显示总分求和 -->
             <th style="width: 15%">总分 <span class="total-score-sum">({{ totalScore }})</span></th>
             <th style="width: 20%; color: #69f0ae;">变动+</th>
             <th style="width: 20%; color: #ff5252;">变动-</th>
@@ -277,8 +422,8 @@ const getSeatStyle = (index: number) => {
         
         <div class="admin-controls">
           <button @click="control('new-game')">新开局(自动翻牌)</button>
-          <!-- 修改：改名为发牌，移除河牌按钮 -->
           <button @click="control('deal-turn')">发牌</button>
+          <button @click="calculateAllScores" class="calc-btn">算分</button>
         </div>
       </div>
 
@@ -300,6 +445,10 @@ const getSeatStyle = (index: number) => {
               <div class="slot-left">
                 <div class="slot-multiplier" :style="{ color: multiplierColors[i] }">
                   {{ slotMultipliers[i] }}
+                </div>
+                
+                <div v-if="calculatedResults[index] && calculatedResults[index][i]" class="slot-rank-info">
+                  {{ calculatedResults[index][i] }}
                 </div>
 
                 <button v-if="index === mySeatIndex && !seat.isShowing && (!seat.shownSlots || !seat.shownSlots.includes(i))" 
@@ -366,7 +515,6 @@ const getSeatStyle = (index: number) => {
             </div>
             
             <div class="action-btns" v-if="index === mySeatIndex">
-              <!-- 移除了弃牌按钮 -->
               <button class="show-btn" @click="showHand" title="全亮">👁️</button>
             </div>
           </div>
@@ -393,6 +541,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .center-area { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 340px; z-index: 5; }
 .board { display: flex; justify-content: center; gap: 8px; margin-bottom: 15px; min-height: 80px; }
 .admin-controls button { background: #455a64; color: white; border: none; padding: 4px 8px; margin: 2px; border-radius: 4px; cursor: pointer; }
+.calc-btn { background: #e65100 !important; font-weight: bold; } /* 算分按钮样式 */
 
 .fixed-reset-btn { position: fixed; top: 15px; left: 15px; z-index: 1000; background: #b71c1c; color: #ffcdd2; border: 1px solid #e53935; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
 .fixed-reset-btn:hover { background: #d32f2f; transform: scale(1.05); }
@@ -540,6 +689,13 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   font-weight: 900;
   text-shadow: 1px 1px 0 black;
   margin-right: 2px;
+}
+.slot-rank-info {
+  font-size: 0.7em;
+  color: #00e676;
+  white-space: nowrap;
+  margin-right: 5px;
+  text-shadow: 1px 1px 0 black;
 }
 
 .slot-show-btn {
