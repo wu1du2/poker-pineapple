@@ -39,7 +39,7 @@ const gameState = {
   seats: new Array(SEAT_COUNT).fill(null) as any[],
   communityCards: [] as any[],
   dealerIndex: -1,
-  billboard: "公告板 (点击编辑)",
+  billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
   phase: 'PREFLOP'
 };
 
@@ -211,6 +211,7 @@ io.on('connection', (socket: Socket) => {
       });
 
       gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+      io.emit('reset-table'); // 新增：广播重置事件
       io.emit('update', getPublicState());
     } 
     else if (action === 'deal-turn') {

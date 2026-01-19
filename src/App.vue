@@ -126,9 +126,9 @@ const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
 const userToken = ref('');
 
 // 存储计算结果
-const calculatedResults = reactive<{ [key: number]: { [slotId: number]: string } }>({});
+const calculatedResults = ref<{ [key: number]: { [slotId: number]: string } }>({});
 // 新增：存储获胜的 Slot。Key: seatIndex, Value: Array of winning slot IDs (e.g. [1, 3])
-const winningSlots = reactive<{ [key: number]: number[] }>({});
+const winningSlots = ref<{ [key: number]: number[] }>({});
 // 新增：存储结算结果
 const settlementResults = reactive<SlotSettlementResult[]>([]);
 // 新增：存储总delta求和
@@ -210,8 +210,17 @@ onMounted(() => {
 
   socket.on('init', (state) => Object.assign(gameState, state));
   
+  socket.on('reset-table', () => {
+    // 收到重置事件，清空所有计算结果
+    calculatedResults.value = {};
+    settlementResults.length = 0;
+    totalDeltaSum.value = 0;
+    winningSlots.value = {};
+  });
+
   socket.on('update', (state) => {
     Object.assign(gameState, state);
+    
     if (mySeatIndex.value !== -1) {
       socket.emit('get-my-hand', mySeatIndex.value, (data: any) => {
         myHand.value = data.hand;
@@ -304,7 +313,7 @@ const control = (action: string) => socket.emit('control', action);
 
 // --- 新增：判断是否是胜者 ---
 const isWinner = (seatIndex: number, slotId: number) => {
-  return winningSlots[seatIndex] && winningSlots[seatIndex].includes(slotId);
+  return winningSlots.value[seatIndex] && winningSlots.value[seatIndex].includes(slotId);
 };
 
 const calculateAllScores = () => {
@@ -315,7 +324,7 @@ const calculateAllScores = () => {
   }
 
   // 清空之前的获胜状态
-  Object.keys(winningSlots).forEach(key => delete winningSlots[parseInt(key)]);
+  winningSlots.value = {};
   // 清空之前的结算结果
   settlementResults.length = 0;
   totalDeltaSum.value = 0;
@@ -337,7 +346,7 @@ const calculateAllScores = () => {
     
     const targetSlots = (idx === mySeatIndex.value) ? mySlots.value : seat.slots;
     
-    if (!calculatedResults[idx]) calculatedResults[idx] = {};
+    if (!calculatedResults.value[idx]) calculatedResults.value[idx] = {};
     if (!playerSlotInfos[idx]) playerSlotInfos[idx] = {};
 
     for (let i = 1; i <= 3; i++) {
@@ -350,7 +359,7 @@ const calculateAllScores = () => {
         const catName = HandCategoryName[res.category] || '高牌';
         
         // 显示结果
-        calculatedResults[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
+        calculatedResults.value[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
         
         // 收集分数用于比较
         const slotScore = slotScores[i];
@@ -366,7 +375,7 @@ const calculateAllScores = () => {
           isRoyal: false
         };
       } else {
-        calculatedResults[idx][i] = '';
+        calculatedResults.value[idx][i] = '';
         playerSlotInfos[idx][i] = {
           seatIndex: idx,
           hasPlayed: false,
@@ -393,12 +402,12 @@ const calculateAllScores = () => {
     // 标记胜者
     winners.forEach(w => {
       const seatIndex = w.seatIndex;
-      let winningSlot = winningSlots[seatIndex];
-      if (!winningSlot) {
-        winningSlot = [];
-        winningSlots[seatIndex] = winningSlot;
-      }
-      winningSlot.push(i);
+      let winningSlot = winningSlots.value[seatIndex];
+          if (!winningSlot) {
+            winningSlot = [];
+            winningSlots.value[seatIndex] = winningSlot;
+          }
+          winningSlot.push(i);
     });
   }
 
@@ -433,7 +442,7 @@ const calculateAllScores = () => {
 const handleHardReset = () => {
   const pwd = prompt("【危险操作】请输入管理员密码以重置服务：");
   if (pwd === '2727') {
-    socket.emit('control', 'hard-reset');
+    socket.emit('hard-reset');
   } else if (pwd !== null) {
     alert("密码错误！");
   }
