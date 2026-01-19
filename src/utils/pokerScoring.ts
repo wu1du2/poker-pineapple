@@ -1,17 +1,19 @@
 // src/utils/pokerScoring.ts
 
 // 牌型 ID 定义（参考之前的代码）
-export enum HandCategory {
-  HighCard = 1,
-  OnePair = 2,
-  TwoPairs = 3,
-  ThreeOfAKind = 4,
-  Straight = 5,
-  Flush = 6,
-  FullHouse = 7,
-  FourOfAKind = 8,
-  StraightFlush = 9
-}
+export const HandCategory = {
+  HighCard: 1,
+  OnePair: 2,
+  TwoPairs: 3,
+  ThreeOfAKind: 4,
+  Straight: 5,
+  Flush: 6,
+  FullHouse: 7,
+  FourOfAKind: 8,
+  StraightFlush: 9
+} as const;
+
+export type HandCategory = typeof HandCategory[keyof typeof HandCategory];
 
 // 基础强度分映射
 const BASE_STRENGTH: Record<number, number> = {

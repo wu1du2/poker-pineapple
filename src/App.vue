@@ -2,6 +2,8 @@
 import { reactive, ref, onMounted, computed } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
+import { calculateSlotSettlement, calculateTotalSettlement } from './utils/pokerScoring';
+import type { PlayerSlotInfo, SettlementResult, SlotSettlementResult } from './utils/pokerScoring';
 
 const socket = io(); 
 
@@ -127,6 +129,10 @@ const userToken = ref('');
 const calculatedResults = reactive<{ [key: number]: { [slotId: number]: string } }>({});
 // 新增：存储获胜的 Slot。Key: seatIndex, Value: Array of winning slot IDs (e.g. [1, 3])
 const winningSlots = reactive<{ [key: number]: number[] }>({});
+// 新增：存储结算结果
+const settlementResults = reactive<SlotSettlementResult[]>([]);
+// 新增：存储总delta求和
+const totalDeltaSum = ref(0);
 
 const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
 
@@ -189,6 +195,16 @@ onMounted(() => {
     socket.emit('get-my-hand', seatIndex, (data: any) => {
       myHand.value = data.hand;
       mySlots.value = data.slots;
+    });
+  });
+
+  socket.on('all-players-ready', () => {
+    allPlayersReady.value = true;
+    // 自动show所有牌
+    gameState.seats.forEach((seat, idx) => {
+      if (seat && !seat.isShowing) {
+        socket.emit('show-hand', { seatIndex: idx });
+      }
     });
   });
 
@@ -257,6 +273,21 @@ const confirmScoreChange = (seatIndex: number, currentScore: number) => {
   inputs.sub = '';
 };
 
+const isReady = ref(false);
+const allPlayersReady = ref(false);
+
+const checkAllSlotsFilled = () => {
+  if (mySeatIndex.value === -1) return false;
+  const mySlotsData = mySlots.value;
+  return Object.values(mySlotsData).every(slot => slot.length === 2);
+};
+
+const toggleReady = () => {
+  if (mySeatIndex.value === -1) return;
+  isReady.value = !isReady.value;
+  socket.emit('ready', { seatIndex: mySeatIndex.value, ready: isReady.value });
+};
+
 const showHand = () => {
   if (mySeatIndex.value !== -1) {
     socket.emit('show-hand', { seatIndex: mySeatIndex.value });
@@ -285,11 +316,20 @@ const calculateAllScores = () => {
 
   // 清空之前的获胜状态
   Object.keys(winningSlots).forEach(key => delete winningSlots[parseInt(key)]);
+  // 清空之前的结算结果
+  settlementResults.length = 0;
+  totalDeltaSum.value = 0;
 
-  // 临时存储所有人的分数： { [slotId]: [ { seatIndex, score } ] }
-  const slotScores: { [key: number]: { seatIndex: number, score: number }[] } = {
+  // 临时存储所有人的分数： { [slotId]: [ { seatIndex, score, category, isRoyal } ] }
+  const slotScores: { [key: number]: { seatIndex: number, score: number, category: number, isRoyal: boolean }[] } = {
     1: [], 2: [], 3: []
   };
+
+  // 临时存储所有人的Slot信息： { [seatIndex]: { [slotId]: PlayerSlotInfo } }
+  const playerSlotInfos: { [key: number]: { [slotId: number]: PlayerSlotInfo } } = {};
+  gameState.seats.forEach((_, idx) => {
+    playerSlotInfos[idx] = {};
+  });
 
   // 1. 计算每个人的分数
   gameState.seats.forEach((seat, idx) => {
@@ -298,6 +338,7 @@ const calculateAllScores = () => {
     const targetSlots = (idx === mySeatIndex.value) ? mySlots.value : seat.slots;
     
     if (!calculatedResults[idx]) calculatedResults[idx] = {};
+    if (!playerSlotInfos[idx]) playerSlotInfos[idx] = {};
 
     for (let i = 1; i <= 3; i++) {
       const slotCards = targetSlots[i] || [];
@@ -314,15 +355,29 @@ const calculateAllScores = () => {
         // 收集分数用于比较
         const slotScore = slotScores[i];
         if (slotScore) {
-          slotScore.push({ seatIndex: idx, score: res.score });
+          slotScore.push({ seatIndex: idx, score: res.score, category: res.category, isRoyal: false });
         }
+        
+        // 存储Slot信息
+        playerSlotInfos[idx][i] = {
+          seatIndex: idx,
+          hasPlayed: true,
+          category: res.category,
+          isRoyal: false
+        };
       } else {
         calculatedResults[idx][i] = '';
+        playerSlotInfos[idx][i] = {
+          seatIndex: idx,
+          hasPlayed: false,
+          category: 0
+        };
       }
     }
   });
 
   // 2. 比较分数，找出每个 Slot 的胜者
+  const slotWinners: { [key: number]: number[] } = {};
   for (let i = 1; i <= 3; i++) {
     const scores = slotScores[i];
     if (!scores || scores.length === 0) continue;
@@ -332,6 +387,8 @@ const calculateAllScores = () => {
     
     // 找出所有等于最大分的人
     const winners = scores.filter(s => s.score === maxScore);
+    const winnerSeatIndices = winners.map(w => w.seatIndex);
+    slotWinners[i] = winnerSeatIndices;
 
     // 标记胜者
     winners.forEach(w => {
@@ -344,6 +401,33 @@ const calculateAllScores = () => {
       winningSlot.push(i);
     });
   }
+
+  // 3. 计算每个Slot的结算结果
+  const slotResults: SettlementResult[][] = [];
+  for (let i = 1; i <= 3; i++) {
+    const players: PlayerSlotInfo[] = [];
+    gameState.seats.forEach((seat, idx) => {
+      if (!seat) return;
+      const playerSlots = playerSlotInfos[idx];
+      if (playerSlots) {
+        const slotInfo = playerSlots[i];
+        if (slotInfo) {
+          players.push(slotInfo);
+        }
+      }
+    });
+    const winnerSeatIndices = slotWinners[i] || [];
+    const slotResult = calculateSlotSettlement(players, winnerSeatIndices, i);
+    slotResults.push(slotResult);
+  }
+
+  // 4. 计算总结算结果
+  const allPlayerSeatIndices = gameState.seats.map((_, idx) => idx).filter(idx => gameState.seats[idx] !== null);
+  const totalResults = calculateTotalSettlement(slotResults, allPlayerSeatIndices);
+  settlementResults.push(...totalResults);
+
+  // 5. 计算总delta求和
+  totalDeltaSum.value = totalResults.reduce((sum, result) => sum + result.totalDelta, 0);
 };
 
 const handleHardReset = () => {
@@ -459,6 +543,10 @@ const getSeatStyle = (index: number) => {
           <PokerCard v-for="c in gameState.communityCards" :key="c.id" :card="c" width="56px" />
         </div>
         
+        <div class="total-delta-sum" v-if="totalDeltaSum !== 0">
+          总Delta求和: {{ totalDeltaSum }}
+        </div>
+        
         <div class="admin-controls">
           <button @click="control('new-game')">新开局(自动翻牌)</button>
           <button @click="control('deal-turn')">发牌</button>
@@ -490,6 +578,12 @@ const getSeatStyle = (index: number) => {
                 
                 <div v-if="calculatedResults[index] && calculatedResults[index][i]" class="slot-rank-info">
                   {{ calculatedResults[index][i] }}
+                </div>
+
+                <div v-if="settlementResults.length > 0 && settlementResults.find(r => r.seatIndex === index)" class="slot-delta-info">
+                  <span v-if="i === 1">Slot1 Delta: {{ settlementResults.find(r => r.seatIndex === index)?.slot1Delta || 0 }}</span>
+                  <span v-if="i === 2">Slot2 Delta: {{ settlementResults.find(r => r.seatIndex === index)?.slot2Delta || 0 }}</span>
+                  <span v-if="i === 3">Slot3 Delta: {{ settlementResults.find(r => r.seatIndex === index)?.slot3Delta || 0 }}</span>
                 </div>
 
                 <button v-if="index === mySeatIndex && !seat.isShowing && (!seat.shownSlots || !seat.shownSlots.includes(i))" 
@@ -535,6 +629,11 @@ const getSeatStyle = (index: number) => {
             </div>
             
             <div class="player-score">Score: {{ seat.score }}</div>
+                <div v-if="settlementResults.length > 0 && settlementResults.find(r => r.seatIndex === index)" class="player-delta-info">
+                  <div>Total Loser Delta: {{ settlementResults.find(r => r.seatIndex === index)?.totalLoserDelta || 0 }}</div>
+                  <div>Total Delta: {{ settlementResults.find(r => r.seatIndex === index)?.totalDelta || 0 }}</div>
+                  <div v-if="settlementResults.find(r => r.seatIndex === index)?.isTotalLoser" class="total-loser-tag">通输</div>
+                </div>
 
             <div class="hand" :class="{ 'folded': seat.isFolded }">
               <template v-if="index === mySeatIndex">
@@ -556,6 +655,14 @@ const getSeatStyle = (index: number) => {
             
             <div class="action-btns" v-if="index === mySeatIndex">
               <button class="show-btn" @click="showHand" title="全亮">👁️</button>
+              <button 
+                class="ready-btn" 
+                @click="toggleReady" 
+                :class="{ 'ready': isReady, 'disabled': !checkAllSlotsFilled() }"
+                :disabled="!checkAllSlotsFilled()"
+                title="Ready">
+                {{ isReady ? '✅' : 'Ready' }}
+              </button>
             </div>
           </div>
         </div>
@@ -580,6 +687,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 
 .center-area { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 340px; z-index: 5; }
 .board { display: flex; justify-content: center; gap: 8px; margin-bottom: 15px; min-height: 80px; }
+.total-delta-sum { color: #ffd700; font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
 .admin-controls button { background: #455a64; color: white; border: none; padding: 4px 8px; margin: 2px; border-radius: 4px; cursor: pointer; }
 .calc-btn { background: #e65100 !important; font-weight: bold; } /* 算分按钮样式 */
 
@@ -687,10 +795,17 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .name-input { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; width: 80px; padding: 2px 5px; border-radius: 4px; font-size: 0.9em; text-align: center; }
 .name-input:focus { background: rgba(0,0,0,0.8); outline: none; border-color: #ffd700; }
 .player-score { font-size: 0.8em; color: #4fc3f7; font-weight: bold; }
+.player-delta-info { font-size: 0.8em; color: #69f0ae; margin-top: 5px; }
+.total-loser-tag { color: #ff5252; font-weight: bold; margin-top: 2px; }
 
 .action-btns { display: flex; gap: 5px; margin-top: 5px; }
 .show-btn { background: #1976d2; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: transform 0.1s; }
 .show-btn:hover { background: #2196f3; transform: scale(1.1); }
+
+.ready-btn { background: #2e7d32; color: white; border: none; border-radius: 4px; width: 50px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: all 0.2s; }
+.ready-btn:hover:not(.disabled) { background: #43a047; transform: scale(1.1); }
+.ready-btn.disabled { background: #455a64; cursor: not-allowed; opacity: 0.7; }
+.ready-btn.ready { background: #2e7d32; color: #fff; font-weight: bold; }
 
 .slots-container {
   display: flex; 
@@ -733,6 +848,13 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .slot-rank-info {
   font-size: 0.7em;
   color: #00e676;
+  white-space: nowrap;
+  margin-right: 5px;
+  text-shadow: 1px 1px 0 black;
+}
+.slot-delta-info {
+  font-size: 0.7em;
+  color: #69f0ae;
   white-space: nowrap;
   margin-right: 5px;
   text-shadow: 1px 1px 0 black;

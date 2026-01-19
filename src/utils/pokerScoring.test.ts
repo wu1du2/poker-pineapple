@@ -1,6 +1,7 @@
 // src/utils/pokerScoring.test.ts
 import { describe, it, expect } from 'vitest';
-import { calculateSlotSettlement, calculateTotalSettlement, HandCategory, PlayerSlotInfo } from './pokerScoring';
+import { calculateSlotSettlement, calculateTotalSettlement, HandCategory } from './pokerScoring';
+import type { PlayerSlotInfo } from './pokerScoring';
 
 describe('Poker Scoring Logic', () => {
   
