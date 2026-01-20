@@ -223,7 +223,7 @@ io.on('connection', (socket: Socket) => {
       if (dealTurnCount === 2) { // 计数达到2
         setTimeout(() => {
           io.emit('auto-calculate'); // 广播自动算分事件
-        }, 2000); // 延迟2秒
+        }, 1000); // 延迟1秒
       }
     }
     else if (action === 'deal-river') {

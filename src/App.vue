@@ -151,10 +151,11 @@ interface Player {
   name: string;
   score: number;
   hand: Card[] | null;
-  slots: { [key: number]: Card[] }; 
+  slots: { [key: number]: Card[] };
   shownSlots: number[];
   isFolded: boolean;
   isShowing: boolean;
+  isReady: boolean;
 }
 
 interface GameState {
@@ -216,6 +217,7 @@ onMounted(() => {
     settlementResults.length = 0;
     totalDeltaSum.value = 0;
     winningSlots.value = {};
+    isReady.value = false; // 新增：同步重置前端ready状态
   });
 
   socket.on('auto-calculate', () => {
@@ -231,6 +233,11 @@ onMounted(() => {
         myHand.value = data.hand;
         mySlots.value = data.slots;
       });
+      // 新增：同步更新前端ready状态
+      const mySeat = gameState.seats[mySeatIndex.value];
+      if (mySeat) {
+        isReady.value = mySeat.isReady;
+      }
     }
   });
 
