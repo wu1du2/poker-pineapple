@@ -218,6 +218,11 @@ onMounted(() => {
     winningSlots.value = {};
   });
 
+  socket.on('auto-calculate', () => {
+    // 收到自动算分事件，执行算分逻辑
+    calculateAllScores();
+  });
+
   socket.on('update', (state) => {
     Object.assign(gameState, state);
     

@@ -34,6 +34,7 @@ class Deck {
 const deck = new Deck();
 
 const SEAT_COUNT = 6;
+let dealTurnCount = 0; // 新增：发牌计数
 
 const gameState = {
   seats: new Array(SEAT_COUNT).fill(null) as any[],
@@ -187,6 +188,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('control', (action) => {
     if (action === 'new-game') {
+      dealTurnCount = 0; // 重置发牌计数
       deck.reset();
       gameState.communityCards = [];
       
@@ -213,10 +215,16 @@ io.on('connection', (socket: Socket) => {
       gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
       io.emit('reset-table'); // 新增：广播重置事件
       io.emit('update', getPublicState());
-    } 
-    else if (action === 'deal-turn') {
+    } else if (action === 'deal-turn') {
+      dealTurnCount++; // 发牌计数加1
       gameState.communityCards.push(deck.deal());
       io.emit('update', getPublicState());
+      
+      if (dealTurnCount === 2) { // 计数达到2
+        setTimeout(() => {
+          io.emit('auto-calculate'); // 广播自动算分事件
+        }, 2000); // 延迟2秒
+      }
     }
     else if (action === 'deal-river') {
       gameState.communityCards.push(deck.deal());
