@@ -385,13 +385,16 @@ const calculateAllScores = () => {
         const res = calculateHandScore5of7(pool);
         const catName = HandCategoryName[res.category] || '高牌';
         
+        // 计算是否为皇家同花顺
+        const isRoyal = res.category === 9 && ((res.score >> 16) & 0xF) === 14;
+
         // 显示结果
         calculatedResults.value[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
         
         // 收集分数用于比较
         const slotScore = slotScores[i];
         if (slotScore) {
-          slotScore.push({ seatIndex: idx, score: res.score, category: res.category, isRoyal: false });
+          slotScore.push({ seatIndex: idx, score: res.score, category: res.category, isRoyal });
         }
         
         // 存储Slot信息
@@ -399,7 +402,7 @@ const calculateAllScores = () => {
           seatIndex: idx,
           hasPlayed: true,
           category: res.category,
-          isRoyal: false
+          isRoyal
         };
       } else {
         calculatedResults.value[idx][i] = '';
