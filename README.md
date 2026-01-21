@@ -36,9 +36,11 @@ npm install
 ### 启动项目
 
 
-npm run build
+build
+npm install && npm run build
 
-npx ts-node server/index.ts
+start
+npm run server
 
 winget install Cloudflare.cloudflared
 cloudflared tunnel --url http://localhost:3000
@@ -57,7 +59,6 @@ cloudflared tunnel --url http://localhost:3000
 3. **游戏操作**：
    - 每位玩家会获得7张手牌
    - 可以将手牌拖放到3个插槽中进行组合
-   - 根据游戏规则进行下注、跟注、弃牌等操作
 4. **游戏控制**：
    - 新建游戏：开始新一轮游戏
    - 发转牌/河牌：发放公共牌
