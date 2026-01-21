@@ -156,6 +156,7 @@ interface Player {
   isFolded: boolean;
   isShowing: boolean;
   isReady: boolean;
+  isAway: boolean; // 新增：暂离状态
 }
 
 interface GameState {
@@ -247,13 +248,14 @@ onMounted(() => {
 });
 
 const sit = (index: number) => {
-  if (gameState.seats[index]) return;
-  socket.emit('sit', { 
-    name: myName.value, 
-    seatIndex: index,
-    token: userToken.value 
-  });
-  mySeatIndex.value = index;
+  if (mySeatIndex.value === -1 && !gameState.seats[index]) {
+    mySeatIndex.value = index;
+    socket.emit('sit', { name: myName.value, seatIndex: index, token: userToken.value });
+  }
+};
+
+const toggleAway = () => {
+  socket.emit('toggle-away');
 };
 
 const updateMyName = (e: Event) => {
@@ -354,7 +356,7 @@ const calculateAllScores = () => {
 
   // 1. 计算每个人的分数
   gameState.seats.forEach((seat, idx) => {
-    if (!seat) return;
+    if (!seat || seat.isAway) return; // 跳过暂离玩家
     
     const targetSlots = (idx === mySeatIndex.value) ? mySlots.value : seat.slots;
     
@@ -443,7 +445,11 @@ const calculateAllScores = () => {
   }
 
   // 4. 计算总结算结果
-  const allPlayerSeatIndices = gameState.seats.map((_, idx) => idx).filter(idx => gameState.seats[idx] !== null);
+  const allPlayerSeatIndices = gameState.seats
+    .map((seat, idx) => ({ seat, idx }))
+    .filter(({ seat }) => seat !== null && !seat.isAway)
+    .map(({ idx }) => idx);
+  
   const totalResults = calculateTotalSettlement(slotResults, allPlayerSeatIndices);
   settlementResults.push(...totalResults);
 
@@ -569,7 +575,7 @@ const getSeatStyle = (index: number) => {
         </div>
         
         <div class="admin-controls">
-          <button @click="control('new-game')">新开局(自动翻牌)</button>
+          <button @click="control('new-game')" class="btn-xl">新开局(自动翻牌)</button>
           <button @click="control('deal-turn')">发牌</button>
           <button @click="calculateAllScores" class="calc-btn">算分</button>
         </div>
@@ -585,7 +591,7 @@ const getSeatStyle = (index: number) => {
                'is-me': index === mySeatIndex 
              }">
 
-          <div class="slots-container">
+          <div class="slots-container" v-if="!seat.isAway">
             <div v-for="i in 3" :key="i" class="slot-box" 
                  :class="{ 
                    'showdown-effect': seat.isShowing || (seat.shownSlots && seat.shownSlots.includes(i)),
@@ -677,12 +683,19 @@ const getSeatStyle = (index: number) => {
             <div class="action-btns" v-if="index === mySeatIndex">
               <button class="show-btn" @click="showHand" title="全亮">👁️</button>
               <button 
-                class="ready-btn" 
+                class="ready-btn btn-xl" 
                 @click="toggleReady" 
                 :class="{ 'ready': isReady, 'disabled': !checkAllSlotsFilled() }"
                 :disabled="!checkAllSlotsFilled()"
                 title="Ready">
                 {{ isReady ? '✅' : 'Ready' }}
+              </button>
+              <button 
+                class="ready-btn btn-warning" 
+                :class="{ 'active': seat.isAway }"
+                @click="toggleAway" 
+                title="暂离/回归">
+                {{ seat.isAway ? '回归' : '暂离' }}
               </button>
             </div>
           </div>
@@ -823,7 +836,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .show-btn { background: #1976d2; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: transform 0.1s; }
 .show-btn:hover { background: #2196f3; transform: scale(1.1); }
 
-.ready-btn { background: #2e7d32; color: white; border: none; border-radius: 4px; width: 50px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: all 0.2s; }
+.ready-btn { background: #2e7d32; color: white; border: none; border-radius: 4px; min-width: 50px; padding: 0 8px; height: 24px; font-size: 12px; cursor: pointer; display: flex; justify-content: center; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transition: all 0.2s; white-space: nowrap; }
 .ready-btn:hover:not(.disabled) { background: #43a047; transform: scale(1.1); }
 .ready-btn.disabled { background: #455a64; cursor: not-allowed; opacity: 0.7; }
 .ready-btn.ready { background: #2e7d32; color: #fff; font-weight: bold; }
@@ -932,5 +945,43 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   0% { box-shadow: 0 0 10px #2196f3; }
   50% { box-shadow: 0 0 20px #64b5f6; }
   100% { box-shadow: 0 0 10px #2196f3; }
+}
+.badge {
+  font-size: 0.8em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+  color: white;
+}
+.badge.ready { background-color: #4caf50; }
+.badge.folded { background-color: #9e9e9e; }
+.badge.away { background-color: #ff9800; } /* 暂离样式 */
+
+.btn-warning {
+  background-color: #ff9800;
+  color: white;
+}
+.btn-warning.active {
+  background-color: #e65100; /* 深橙色表示已暂离 */
+  border: 2px solid #fff;
+}
+.btn-warning.active {
+  background: #e65100 !important;
+  border: 1px solid white;
+}
+
+.btn-xl {
+  font-size: 16px !important;
+  padding: 0 20px !important;
+  min-width: 90px !important;
+  height: 40px !important;
+  font-weight: bold !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+}
+.btn-xl:hover {
+  transform: scale(1.05) !important;
 }
 </style>

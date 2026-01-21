@@ -39,7 +39,7 @@ let dealTurnCount = 0; // 新增：发牌计数
 const gameState = {
   seats: new Array(SEAT_COUNT).fill(null) as any[],
   communityCards: [] as any[],
-  dealerIndex: -1,
+  // dealerIndex: -1, // 移除庄家索引
   billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
   phase: 'PREFLOP'
 };
@@ -69,7 +69,7 @@ io.on('connection', (socket: Socket) => {
   // --- 修改：入座时绑定 Token ---
   socket.on('sit', ({ name, seatIndex, token }) => {
     if (!gameState.seats[seatIndex]) {
-      const isFirstPlayer = gameState.seats.every(s => s === null);
+      // const isFirstPlayer = gameState.seats.every(s => s === null); // 移除首位玩家判断
       gameState.seats[seatIndex] = {
         id: socket.id,
         token: token, // 绑定 Token
@@ -80,9 +80,20 @@ io.on('connection', (socket: Socket) => {
         shownSlots: [],
         isFolded: false,
         isShowing: false,
-        isReady: false 
+        isReady: false,
+        isAway: false // 新增：暂离状态
       };
-      if (isFirstPlayer) gameState.dealerIndex = seatIndex;
+      // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
+      io.emit('update', getPublicState());
+    }
+  });
+
+  // 新增：切换暂离状态
+  socket.on('toggle-away', () => {
+    const seatIndex = gameState.seats.findIndex(s => s && s.id === socket.id);
+    if (seatIndex !== -1) {
+      const p = gameState.seats[seatIndex];
+      p.isAway = !p.isAway;
       io.emit('update', getPublicState());
     }
   });
@@ -113,8 +124,8 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('fold', ({ seatIndex }) => {
     const p = gameState.seats[seatIndex];
-    // 增加 ID 校验，防止旧连接操作
-    if (p && p.id === socket.id) {
+    // 增加 ID 校验，防止旧连接操作，且暂离玩家不可操作
+    if (p && p.id === socket.id && !p.isAway) {
       p.isFolded = true;
       io.emit('update', getPublicState());
     }
@@ -122,7 +133,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('show-hand', ({ seatIndex }) => {
     const p = gameState.seats[seatIndex];
-    if (p && p.id === socket.id) {
+    if (p && p.id === socket.id && !p.isAway) {
       p.isShowing = true; 
       io.emit('update', getPublicState());
     }
@@ -130,7 +141,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('show-slot', ({ seatIndex, slotId }) => {
     const p = gameState.seats[seatIndex];
-    if (p && p.id === socket.id) {
+    if (p && p.id === socket.id && !p.isAway) {
       if (!p.shownSlots.includes(slotId)) {
         p.shownSlots.push(slotId);
         io.emit('update', getPublicState());
@@ -140,8 +151,8 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('move-card', ({ seatIndex, cardId, target }) => {
     const p = gameState.seats[seatIndex];
-    // 严格校验 ID
-    if (!p || p.id !== socket.id) return; 
+    // 严格校验 ID，且暂离玩家不可操作
+    if (!p || p.id !== socket.id || p.isAway) return; 
 
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
@@ -192,6 +203,8 @@ io.on('connection', (socket: Socket) => {
       deck.reset();
       gameState.communityCards = [];
       
+      // 移除庄家轮换逻辑
+      /*
       let nextIdx = gameState.dealerIndex;
       let loopCount = 0;
       do {
@@ -199,16 +212,28 @@ io.on('connection', (socket: Socket) => {
         loopCount++;
       } while (!gameState.seats[nextIdx] && loopCount < SEAT_COUNT);
       if (gameState.seats[nextIdx]) gameState.dealerIndex = nextIdx;
+      */
 
       gameState.seats.forEach(p => {
         if (p) {
-          p.hand = [];
-          for(let i=0; i<7; i++) p.hand.push(deck.deal());
-          p.slots = { 1: [], 2: [], 3: [] };
-          p.shownSlots = []; 
-          p.isFolded = false;
-          p.isShowing = false;
-          p.isReady = false;
+          // 只有非暂离玩家才发牌
+          if (!p.isAway) {
+            p.hand = [];
+            for(let i=0; i<7; i++) p.hand.push(deck.deal());
+            p.slots = { 1: [], 2: [], 3: [] };
+            p.shownSlots = []; 
+            p.isFolded = false;
+            p.isShowing = false;
+            p.isReady = false;
+          } else {
+            // 暂离玩家清空手牌和状态
+            p.hand = [];
+            p.slots = { 1: [], 2: [], 3: [] };
+            p.shownSlots = [];
+            p.isFolded = false;
+            p.isShowing = false;
+            p.isReady = false;
+          }
         }
       });
 
@@ -235,9 +260,9 @@ io.on('connection', (socket: Socket) => {
   socket.on('hard-reset', () => {
       deck.reset();
       gameState.communityCards = [];
-      gameState.dealerIndex = -1;
+      // gameState.dealerIndex = -1; // 移除庄家重置
       gameState.seats = new Array(SEAT_COUNT).fill(null);
-      gameState.billboard = "公告板 (点击编辑)";
+      gameState.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
       io.emit('update', getPublicState());
       io.emit('force-reload');
     });
@@ -255,12 +280,13 @@ io.on('connection', (socket: Socket) => {
   // 新增：处理Ready事件
   socket.on('ready', ({ seatIndex, ready }) => {
     const p = gameState.seats[seatIndex];
-    if (p && p.id === socket.id) {
+    // 暂离玩家不能操作 Ready
+    if (p && p.id === socket.id && !p.isAway) {
       p.isReady = ready;
       io.emit('update', getPublicState());
       
-      // 检查所有玩家是否都Ready
-      const allReady = gameState.seats.every(seat => seat === null || seat.isReady);
+      // 检查所有玩家是否都Ready（跳过暂离玩家）
+      const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
       if (allReady) {
         io.emit('all-players-ready');
       }
