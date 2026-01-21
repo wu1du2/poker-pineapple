@@ -208,6 +208,17 @@ onMounted(() => {
         socket.emit('show-hand', { seatIndex: idx });
       }
     });
+
+    // 自动发牌逻辑：由第一个入座玩家触发
+    const firstPlayerIndex = gameState.seats.findIndex(s => s !== null);
+    if (mySeatIndex.value !== -1 && mySeatIndex.value === firstPlayerIndex) {
+      setTimeout(() => {
+        socket.emit('control', 'deal-turn');
+        setTimeout(() => {
+          socket.emit('control', 'deal-turn');
+        }, 1000);
+      }, 1000);
+    }
   });
 
   socket.on('init', (state) => Object.assign(gameState, state));
@@ -219,6 +230,7 @@ onMounted(() => {
     totalDeltaSum.value = 0;
     winningSlots.value = {};
     isReady.value = false; // 新增：同步重置前端ready状态
+    isScoreSettled.value = false; // 重置结算状态
   });
 
   socket.on('auto-calculate', () => {
@@ -298,6 +310,7 @@ const confirmScoreChange = (seatIndex: number, currentScore: number) => {
 
 const isReady = ref(false);
 const allPlayersReady = ref(false);
+const isScoreSettled = ref(false); // 新增：标记本局分数是否已结算
 
 const checkAllSlotsFilled = () => {
   if (mySeatIndex.value === -1) return false;
@@ -455,6 +468,20 @@ const calculateAllScores = () => {
 
   // 5. 计算总delta求和
   totalDeltaSum.value = totalResults.reduce((sum, result) => sum + result.totalDelta, 0);
+
+  // 自动累加分数（仅更新自己的，防止重复）
+  if (!isScoreSettled.value) {
+    const myResult = settlementResults.find(r => r.seatIndex === mySeatIndex.value);
+    if (myResult) {
+      const currentSeat = gameState.seats[mySeatIndex.value];
+      if (currentSeat) {
+        const newScore = currentSeat.score + myResult.totalDelta;
+        socket.emit('update-score', { seatIndex: mySeatIndex.value, score: newScore });
+      }
+    }
+    // 标记为已结算，防止重复累加
+    isScoreSettled.value = true;
+  }
 };
 
 const handleHardReset = () => {
@@ -960,6 +987,7 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 .btn-warning {
   background-color: #ff9800;
   color: white;
+  margin-left: 20px; /* 增加左边距，避免误触 */
 }
 .btn-warning.active {
   background-color: #e65100; /* 深橙色表示已暂离 */
