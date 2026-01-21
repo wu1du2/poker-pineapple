@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed } from 'vue';
+import { reactive, ref, onMounted, computed, watch } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
 import { calculateSlotSettlement, calculateTotalSettlement } from './utils/pokerScoring';
@@ -343,6 +343,28 @@ const isWinner = (seatIndex: number, slotId: number) => {
   return winningSlots.value[seatIndex] && winningSlots.value[seatIndex].includes(slotId);
 };
 
+// --- 河牌动画逻辑 ---
+const showRiverMask = ref(false);
+const riverMaskClass = ref('');
+
+watch(() => gameState.communityCards.length, (newLen, oldLen) => {
+  // 当牌数从4变为5时触发动画
+  if (newLen === 5 && oldLen === 4) {
+    showRiverMask.value = true;
+    riverMaskClass.value = '';
+    
+    // 稍微延迟以确保DOM渲染
+    setTimeout(() => {
+      riverMaskClass.value = 'slide-up';
+    }, 50);
+
+    // 动画结束后清理
+    setTimeout(() => {
+      showRiverMask.value = false;
+    }, 2550);
+  }
+});
+
 const calculateAllScores = () => {
   const community = gameState.communityCards;
   if (community.length < 3) {
@@ -597,7 +619,13 @@ const getSeatStyle = (index: number) => {
       
       <div class="center-area">
         <div class="board">
-          <PokerCard v-for="c in gameState.communityCards" :key="c.id" :card="c" width="56px" />
+          <div v-for="(c, index) in gameState.communityCards" :key="c.id" class="community-card-wrapper">
+            <PokerCard :card="c" width="56px" />
+            <div v-if="index === 4 && showRiverMask" 
+                 class="river-mask" 
+                 :class="riverMaskClass">
+            </div>
+          </div>
         </div>
         
         <div class="total-delta-sum" v-if="totalDeltaSum !== 0">
@@ -749,7 +777,41 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
   box-shadow: 0 0 50px rgba(0,0,0,0.5) inset; 
 }
 
-.center-area { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 340px; z-index: 5; }
+/* 河牌动画样式 */
+.community-card-wrapper {
+  position: relative;
+  display: inline-block;
+  margin: 0 2px;
+}
+
+.river-mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #2c3e50; /* 深色牌背 */
+  border-radius: 4px; /* 匹配 PokerCard 的圆角 */
+  z-index: 10;
+  border: 2px solid #fff;
+  box-sizing: border-box;
+  transform: translateY(0);
+}
+
+.river-mask.slide-up {
+  transform: translateY(-120%);
+  opacity: 0;
+  transition: all 2.5s cubic-bezier(0.7, 0.05, 0.9, 0.5);
+}
+
+.center-area { 
+  position: absolute; 
+  top: 50%; 
+  left: 50%; 
+  transform: translate(-50%, -50%); 
+  text-align: center; 
+  z-index: 10; 
+}
 .board { display: flex; justify-content: center; gap: 8px; margin-bottom: 15px; min-height: 80px; }
 .total-delta-sum { color: #ffd700; font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
 .admin-controls button { background: #455a64; color: white; border: none; padding: 4px 8px; margin: 2px; border-radius: 4px; cursor: pointer; }
