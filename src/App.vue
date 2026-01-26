@@ -134,6 +134,8 @@ const settlementResults = reactive<SlotSettlementResult[]>([]);
 // 新增：存储总delta求和
 const totalDeltaSum = ref(0);
 
+const isScoreboardExpanded = ref(true);
+
 const scoreInputs = reactive(Array.from({ length: 6 }, () => ({ add: '', sub: '' })));
 
 const slotMultipliers: { [key: number]: string } = { 1: '5倍', 2: '3倍', 3: '1倍' };
@@ -564,8 +566,11 @@ const getSeatStyle = (index: number) => {
     </div>
 
     <div class="scoreboard">
-      <h3>积分榜</h3>
-      <table>
+      <h3 @click="isScoreboardExpanded = !isScoreboardExpanded" style="cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+        <span>积分榜</span>
+        <span style="font-size: 0.8em;">{{ isScoreboardExpanded ? '▼' : '▶' }}</span>
+      </h3>
+      <table v-show="isScoreboardExpanded">
         <thead>
           <tr>
             <th style="width: 25%">玩家</th>

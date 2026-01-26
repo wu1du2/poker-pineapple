@@ -153,6 +153,9 @@ io.on('connection', (socket: Socket) => {
     const p = gameState.seats[seatIndex];
     // 严格校验 ID，且暂离玩家不可操作
     if (!p || p.id !== socket.id || p.isAway) return; 
+    
+    // 防误触：只有在 PLAYING 阶段允许移牌
+    if (gameState.phase !== 'PLAYING') return;
 
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
@@ -202,6 +205,7 @@ io.on('connection', (socket: Socket) => {
       dealTurnCount = 0; // 重置发牌计数
       deck.reset();
       gameState.communityCards = [];
+      gameState.phase = 'PLAYING'; // 设置阶段为 PLAYING
       
       // 移除庄家轮换逻辑
       /*
@@ -241,6 +245,19 @@ io.on('connection', (socket: Socket) => {
       io.emit('reset-table'); // 新增：广播重置事件
       io.emit('update', getPublicState());
     } else if (action === 'deal-turn') {
+      // 防误触：只有在 SHOWDOWN 阶段允许发牌
+      if (gameState.phase !== 'SHOWDOWN') {
+         console.log("Not in SHOWDOWN phase, skipping deal-turn");
+         return;
+      }
+      
+      // 校验是否所有人都Ready (双重保险)
+      const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
+      if (!allReady) {
+        console.log("Not all players ready, skipping deal-turn");
+        return;
+      }
+
       dealTurnCount++; // 发牌计数加1
       gameState.communityCards.push(deck.deal());
       io.emit('update', getPublicState());
@@ -282,12 +299,16 @@ io.on('connection', (socket: Socket) => {
     const p = gameState.seats[seatIndex];
     // 暂离玩家不能操作 Ready
     if (p && p.id === socket.id && !p.isAway) {
+      // 防误触：只有在 PLAYING 阶段允许改变 Ready 状态
+      if (gameState.phase !== 'PLAYING') return;
+
       p.isReady = ready;
       io.emit('update', getPublicState());
       
       // 检查所有玩家是否都Ready（跳过暂离玩家）
       const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
       if (allReady) {
+        gameState.phase = 'SHOWDOWN'; // 切换阶段为 SHOWDOWN
         io.emit('all-players-ready');
       }
     }
