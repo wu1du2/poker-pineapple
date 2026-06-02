@@ -61,6 +61,7 @@ const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).lengt
 const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
 const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
 const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat) => !seat));
+const canFillAi = computed(() => Boolean(mySeat.value) && firstEmptySeatIndex.value !== -1);
 const resultPlayers = computed(() => {
   return props.gameState.seats
     .map((seat, seatIndex) => ({ seat, seatIndex }))
@@ -253,6 +254,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
     </section>
 
     <section class="admin-mobile-panel">
+      <button type="button" :disabled="!canFillAi" @click="control('fill-ai')">加满AI</button>
       <button type="button" @click="control('new-game')">新开局</button>
       <button type="button" @click="calculateAllScores">算分</button>
     </section>
@@ -544,8 +546,12 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .admin-mobile-panel {
   padding: 8px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.admin-mobile-panel button:disabled {
+  opacity: 0.45;
 }
 
 .results-panel {

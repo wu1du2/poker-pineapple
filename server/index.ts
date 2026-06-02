@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
+import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -215,7 +216,10 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('control', (action) => {
-    if (action === 'new-game') {
+    if (action === 'fill-ai') {
+      fillEmptySeatsWithAi(gameState.seats);
+      io.emit('update', getPublicState());
+    } else if (action === 'new-game') {
       dealTurnCount = 0; // 重置发牌计数
       deck.reset();
       gameState.communityCards = [];
@@ -243,6 +247,7 @@ io.on('connection', (socket: Socket) => {
             p.isFolded = false;
             p.isShowing = false;
             p.isReady = false;
+            arrangeAiHandInOrder(p);
           } else {
             // 暂离玩家清空手牌和状态
             p.hand = [];

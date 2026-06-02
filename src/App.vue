@@ -696,6 +696,7 @@ window.__pokerDebug = {
         </div>
         
         <div class="admin-controls">
+          <button @click="control('fill-ai')">加满AI</button>
           <button @click="control('new-game')" class="btn-xl">新开局(自动翻牌)</button>
           <button @click="control('deal-turn')">发牌</button>
           <button @click="calculateAllScores" class="calc-btn">算分</button>
