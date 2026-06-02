@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeAiHandInOrder, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
+import { arrangeAiHandInOrder, createAiPlayer, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
 
 const card = (id: string) => ({ id, suit: '♠', rank: id, color: 'black' });
 
 describe('AI player helpers', () => {
+  it('creates AI players ready for the next round but not done arranging', () => {
+    const player = createAiPlayer(1);
+
+    expect(player.isReady).toBe(true);
+    expect(player.isDone).toBe(false);
+  });
+
   it('fills empty seats with named AI players without replacing humans', () => {
     const seats = [
       { id: 'human-1', token: 'token-1', name: 'Human', score: 12, hand: [], slots: { 1: [], 2: [], 3: [] }, shownSlots: [], isFolded: false, isShowing: false, isReady: false, isAway: false },
@@ -33,6 +40,7 @@ describe('AI player helpers', () => {
       isFolded: false,
       isShowing: false,
       isReady: false,
+      isDone: false,
       isAway: false,
       isBot: true
     };
@@ -44,6 +52,7 @@ describe('AI player helpers', () => {
     expect(player.slots[3].map((c) => c.id)).toEqual(['E', 'F']);
     expect(player.hand.map((c) => c.id)).toEqual(['G']);
     expect(player.isReady).toBe(true);
+    expect(player.isDone).toBe(true);
     expect(player.isShowing).toBe(false);
   });
 

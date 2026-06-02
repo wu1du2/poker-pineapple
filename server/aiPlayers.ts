@@ -16,6 +16,7 @@ export interface AiPlayer {
   isFolded: boolean;
   isShowing: boolean;
   isReady: boolean;
+  isDone: boolean;
   isAway: boolean;
   isBot?: boolean;
 }
@@ -31,7 +32,8 @@ export function createAiPlayer(seatIndex: number): AiPlayer {
     shownSlots: [],
     isFolded: false,
     isShowing: false,
-    isReady: false,
+    isReady: true,
+    isDone: false,
     isAway: false,
     isBot: true
   };
@@ -61,6 +63,7 @@ export function arrangeAiHandInOrder(player: AiPlayer): void {
   player.isFolded = false;
   player.isShowing = false;
   player.isReady = true;
+  player.isDone = true;
 }
 
 export function revealAiPlayers(seats: (AiPlayer | null)[]): void {

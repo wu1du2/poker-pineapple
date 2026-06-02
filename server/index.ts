@@ -47,6 +47,83 @@ const gameState = {
   phase: 'PREFLOP'
 };
 
+function isActiveSeat(seat: any) {
+  return Boolean(seat && !seat.isAway);
+}
+
+function hasActivePlayers() {
+  return gameState.seats.some(isActiveSeat);
+}
+
+function areAllActiveReady() {
+  return hasActivePlayers() && gameState.seats.every(seat => seat === null || seat.isAway || seat.isReady);
+}
+
+function areAllActiveDone() {
+  return hasActivePlayers() && gameState.seats.every(seat => seat === null || seat.isAway || seat.isDone);
+}
+
+function isSeatFullyArranged(seat: any) {
+  return [1, 2, 3].every(slotId => (seat.slots?.[slotId]?.length || 0) === 2);
+}
+
+function revealActivePlayers() {
+  gameState.seats.forEach((seat) => {
+    if (isActiveSeat(seat)) {
+      seat.isShowing = true;
+      seat.shownSlots = [1, 2, 3];
+    }
+  });
+}
+
+function startNewRound() {
+  dealTurnCount = 0;
+  deck.reset();
+  gameState.communityCards = [];
+  gameState.phase = 'PLAYING';
+
+  gameState.seats.forEach(p => {
+    if (!p) return;
+
+    p.hand = [];
+    p.slots = { 1: [], 2: [], 3: [] };
+    p.shownSlots = [];
+    p.isFolded = false;
+    p.isShowing = false;
+    p.isDone = false;
+
+    if (p.isAway) {
+      p.isReady = false;
+      return;
+    }
+
+    for (let i = 0; i < 7; i++) p.hand.push(deck.deal());
+    p.isReady = Boolean(p.isBot);
+    arrangeAiHandInOrder(p);
+  });
+
+  gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+  io.emit('reset-table');
+  io.emit('update', getPublicState());
+}
+
+function completeShowdown() {
+  gameState.phase = 'SHOWDOWN';
+  revealAiPlayers(gameState.seats);
+  revealActivePlayers();
+
+  while (gameState.communityCards.length < 5) {
+    gameState.communityCards.push(deck.deal());
+  }
+  dealTurnCount = Math.max(0, gameState.communityCards.length - 3);
+
+  io.emit('update', getPublicState());
+  io.emit('all-players-ready');
+  setTimeout(() => {
+    io.emit('auto-calculate');
+  }, 1000);
+}
+
 app.post('/debug/mock6-showdown', (_req, res) => {
   dealTurnCount = 2;
   const mockState = buildMock6ShowdownState();
@@ -96,6 +173,7 @@ io.on('connection', (socket: Socket) => {
         isFolded: false,
         isShowing: false,
         isReady: false,
+        isDone: false,
         isAway: false // 新增：暂离状态
       };
       // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
@@ -171,6 +249,7 @@ io.on('connection', (socket: Socket) => {
     
     // 防误触：只有在 PLAYING 阶段允许移牌
     if (gameState.phase !== 'PLAYING') return;
+    if (p.isDone) return;
 
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
@@ -220,49 +299,7 @@ io.on('connection', (socket: Socket) => {
       fillEmptySeatsWithAi(gameState.seats);
       io.emit('update', getPublicState());
     } else if (action === 'new-game') {
-      dealTurnCount = 0; // 重置发牌计数
-      deck.reset();
-      gameState.communityCards = [];
-      gameState.phase = 'PLAYING'; // 设置阶段为 PLAYING
-      
-      // 移除庄家轮换逻辑
-      /*
-      let nextIdx = gameState.dealerIndex;
-      let loopCount = 0;
-      do {
-        nextIdx = (nextIdx + 1) % SEAT_COUNT;
-        loopCount++;
-      } while (!gameState.seats[nextIdx] && loopCount < SEAT_COUNT);
-      if (gameState.seats[nextIdx]) gameState.dealerIndex = nextIdx;
-      */
-
-      gameState.seats.forEach(p => {
-        if (p) {
-          // 只有非暂离玩家才发牌
-          if (!p.isAway) {
-            p.hand = [];
-            for(let i=0; i<7; i++) p.hand.push(deck.deal());
-            p.slots = { 1: [], 2: [], 3: [] };
-            p.shownSlots = []; 
-            p.isFolded = false;
-            p.isShowing = false;
-            p.isReady = false;
-            arrangeAiHandInOrder(p);
-          } else {
-            // 暂离玩家清空手牌和状态
-            p.hand = [];
-            p.slots = { 1: [], 2: [], 3: [] };
-            p.shownSlots = [];
-            p.isFolded = false;
-            p.isShowing = false;
-            p.isReady = false;
-          }
-        }
-      });
-
-      gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
-      io.emit('reset-table'); // 新增：广播重置事件
-      io.emit('update', getPublicState());
+      startNewRound();
     } else if (action === 'deal-turn') {
       // 防误触：只有在 SHOWDOWN 阶段允许发牌
       if (gameState.phase !== 'SHOWDOWN') {
@@ -270,10 +307,9 @@ io.on('connection', (socket: Socket) => {
          return;
       }
       
-      // 校验是否所有人都Ready (双重保险)
-      const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
-      if (!allReady) {
-        console.log("Not all players ready, skipping deal-turn");
+      // 校验是否所有人都已完成摆牌 (双重保险)
+      if (!areAllActiveDone()) {
+        console.log("Not all players done, skipping deal-turn");
         return;
       }
 
@@ -316,21 +352,26 @@ io.on('connection', (socket: Socket) => {
   // 新增：处理Ready事件
   socket.on('ready', ({ seatIndex, ready }) => {
     const p = gameState.seats[seatIndex];
-    // 暂离玩家不能操作 Ready
     if (p && p.id === socket.id && !p.isAway) {
-      // 防误触：只有在 PLAYING 阶段允许改变 Ready 状态
-      if (gameState.phase !== 'PLAYING') return;
+      if (gameState.phase === 'PLAYING') {
+        if (ready && !isSeatFullyArranged(p)) return;
+
+        p.isDone = ready;
+
+        if (areAllActiveDone()) {
+          completeShowdown();
+        } else {
+          io.emit('update', getPublicState());
+        }
+        return;
+      }
 
       p.isReady = ready;
+      p.isDone = false;
       io.emit('update', getPublicState());
-      
-      // 检查所有玩家是否都Ready（跳过暂离玩家）
-      const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
-      if (allReady) {
-        gameState.phase = 'SHOWDOWN'; // 切换阶段为 SHOWDOWN
-        revealAiPlayers(gameState.seats);
-        io.emit('update', getPublicState());
-        io.emit('all-players-ready');
+
+      if (areAllActiveReady()) {
+        startNewRound();
       }
     }
   });

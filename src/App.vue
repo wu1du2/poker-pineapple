@@ -166,6 +166,7 @@ interface Player {
   isFolded: boolean;
   isShowing: boolean;
   isReady: boolean;
+  isDone: boolean;
   isAway: boolean; // 新增：暂离状态
 }
 
@@ -173,6 +174,7 @@ interface GameState {
   seats: (Player | null)[];
   communityCards: Card[];
   billboard: string;
+  phase?: string;
 }
 
 const gameState = reactive<GameState>({
@@ -212,23 +214,6 @@ onMounted(() => {
 
   socket.on('all-players-ready', () => {
     allPlayersReady.value = true;
-    // 自动show所有牌
-    gameState.seats.forEach((seat, idx) => {
-      if (seat && !seat.isShowing) {
-        socket.emit('show-hand', { seatIndex: idx });
-      }
-    });
-
-    // 自动发牌逻辑：由第一个入座玩家触发
-    const firstPlayerIndex = gameState.seats.findIndex(s => s !== null);
-    if (mySeatIndex.value !== -1 && mySeatIndex.value === firstPlayerIndex) {
-      setTimeout(() => {
-        socket.emit('control', 'deal-turn');
-        setTimeout(() => {
-          socket.emit('control', 'deal-turn');
-        }, 1000);
-      }, 1000);
-    }
   });
 
   socket.on('init', (state) => Object.assign(gameState, state));
@@ -259,7 +244,7 @@ onMounted(() => {
       // 新增：同步更新前端ready状态
       const mySeat = gameState.seats[mySeatIndex.value];
       if (mySeat) {
-        isReady.value = mySeat.isReady;
+        isReady.value = gameState.phase === 'PLAYING' ? Boolean(mySeat.isDone) : mySeat.isReady;
       }
     }
   });
@@ -330,8 +315,12 @@ const checkAllSlotsFilled = () => {
 
 const toggleReady = () => {
   if (mySeatIndex.value === -1) return;
-  isReady.value = !isReady.value;
-  socket.emit('ready', { seatIndex: mySeatIndex.value, ready: isReady.value });
+  const mySeat = gameState.seats[mySeatIndex.value];
+  if (!mySeat) return;
+
+  const nextValue = gameState.phase === 'PLAYING' ? !mySeat.isDone : !mySeat.isReady;
+  isReady.value = nextValue;
+  socket.emit('ready', { seatIndex: mySeatIndex.value, ready: nextValue });
 };
 
 const showHand = () => {

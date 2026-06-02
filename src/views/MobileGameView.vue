@@ -20,6 +20,7 @@ interface Player {
   isFolded: boolean;
   isShowing: boolean;
   isReady: boolean;
+  isDone: boolean;
   isAway: boolean;
 }
 
@@ -59,9 +60,20 @@ const props = defineProps<{
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
 const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
+const isArranging = computed(() => props.gameState.phase === 'PLAYING');
 const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
 const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat) => !seat));
-const canFillAi = computed(() => Boolean(mySeat.value) && firstEmptySeatIndex.value !== -1);
+const canFillAi = computed(() => Boolean(mySeat.value) && firstEmptySeatIndex.value !== -1 && !isArranging.value);
+const primaryActionActive = computed(() => isArranging.value ? Boolean(mySeat.value?.isDone) : Boolean(mySeat.value?.isReady));
+const primaryActionLabel = computed(() => {
+  if (isArranging.value) return mySeat.value?.isDone ? '已放好' : '牌放好了 done';
+  return mySeat.value?.isReady ? '已准备' : '准备下一局 ready';
+});
+const primaryActionDisabled = computed(() => {
+  if (!mySeat.value) return true;
+  if (!isArranging.value) return false;
+  return !mySeat.value.isDone && !props.checkAllSlotsFilled();
+});
 const resultPlayers = computed(() => {
   return props.gameState.seats
     .map((seat, seatIndex) => ({ seat, seatIndex }))
@@ -114,12 +126,15 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         :key="index"
         type="button"
         class="seat-pill"
-        :class="{ occupied: seat, mine: index === mySeatIndex, ready: seat?.isReady, away: seat?.isAway }"
+        :class="{ occupied: seat, mine: index === mySeatIndex, ready: !isArranging && seat?.isReady, done: isArranging && seat?.isDone, away: seat?.isAway }"
         @click="!seat && sit(index)"
       >
         <span class="seat-name">{{ seat ? seat.name : `座位${index + 1}` }}</span>
         <span class="seat-meta">
-          <template v-if="seat">{{ seat.score }} · {{ seat.isAway ? '暂离' : seat.isReady ? 'Ready' : '等待' }}</template>
+          <template v-if="seat">
+            {{ seat.score }} ·
+            {{ seat.isAway ? '暂离' : isArranging ? (seat.isDone ? 'Done' : '摆牌') : (seat.isReady ? 'Ready' : '等待') }}
+          </template>
           <template v-else>入座</template>
         </span>
       </button>
@@ -177,11 +192,11 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <button
           type="button"
           class="primary-action"
-          :class="{ ready: isReady }"
-          :disabled="!checkAllSlotsFilled()"
+          :class="{ ready: primaryActionActive }"
+          :disabled="primaryActionDisabled"
           @click="toggleReady"
         >
-          {{ isReady ? '已准备' : '准备' }}
+          {{ primaryActionLabel }}
         </button>
       </div>
 
@@ -199,7 +214,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
     </section>
 
     <section v-else-if="firstEmptySeatIndex !== -1" class="join-panel">
-      <p>点一个空座入座，摆好三道后手动 Ready。</p>
+      <p>点一个空座入座，准备后开始下一局。</p>
       <button type="button" class="primary-action" @click="sit(firstEmptySeatIndex)">一键入座</button>
     </section>
 
@@ -255,8 +270,8 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
     <section class="admin-mobile-panel">
       <button type="button" :disabled="!canFillAi" @click="control('fill-ai')">加满AI</button>
-      <button type="button" @click="control('new-game')">新开局</button>
-      <button type="button" @click="calculateAllScores">算分</button>
+      <button type="button" @click="control('new-game')">调试发牌</button>
+      <button type="button" @click="calculateAllScores">手动算分</button>
     </section>
   </main>
 </template>
@@ -345,7 +360,8 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   border-color: #f8d56b;
 }
 
-.seat-pill.ready {
+.seat-pill.ready,
+.seat-pill.done {
   box-shadow: inset 0 -3px 0 #50c878;
 }
 

@@ -70,7 +70,7 @@ async function main() {
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 1);
     await page.getByRole('button', { name: '加满AI' }).click();
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 6);
-    await page.getByRole('button', { name: '新开局' }).click();
+    await page.getByRole('button', { name: '准备下一局 ready' }).click();
     await page.waitForFunction(() => {
       const state = window.__pokerDebug?.getState()?.gameState;
       if (!state || state.phase !== 'PLAYING') return false;
@@ -78,6 +78,7 @@ async function main() {
       const aiSeats = seats.filter((seat) => seat.isBot);
       return aiSeats.length === 5 && aiSeats.every((seat) => (
         seat.isReady &&
+        seat.isDone &&
         [1, 2, 3].every((slotId) => seat.slots?.[slotId]?.length === 2)
       ));
     });
@@ -85,7 +86,7 @@ async function main() {
     for (let index = 0; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();
     }
-    await page.getByRole('button', { name: '准备' }).click();
+    await page.getByRole('button', { name: '牌放好了 done' }).click();
     await page.waitForSelector('[data-testid="showdown-results"]');
     await page.waitForFunction(() => {
       const state = window.__pokerDebug?.getState()?.gameState;
@@ -103,6 +104,11 @@ async function main() {
         debugState?.settlementResults?.length === 6 &&
         document.querySelectorAll('.result-player-card').length === 6;
     });
+    const nextRoundReadyButton = page.getByRole('button', { name: '准备下一局 ready' });
+    await nextRoundReadyButton.waitFor();
+    if (!(await nextRoundReadyButton.isEnabled())) {
+      throw new Error('Expected next-round ready button to be enabled after showdown');
+    }
     await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
       const results = document.querySelector('[data-testid="showdown-results"]');
@@ -123,7 +129,7 @@ async function main() {
         '# Solo AI Smoke Run',
         '',
         `- URL: ${baseUrl}/?ui=mobile`,
-        '- Flow: one-key sit -> fill AI -> new game',
+        '- Flow: one-key sit -> fill AI -> ready next round -> done -> auto showdown',
         '- Screenshot: solo-ai.png',
         '- State: solo-ai-state.json',
         ''
