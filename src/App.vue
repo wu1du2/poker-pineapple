@@ -9,11 +9,10 @@ import type { PlayerSlotInfo, SettlementResult, SlotSettlementResult } from './u
 const socket = io(); 
 
 const initialUiMode = new URLSearchParams(window.location.search).get('ui');
-const useMobileUi = ref(initialUiMode === 'mobile' || localStorage.getItem('poker_ui_mode') === 'mobile');
+const useMobileUi = ref(initialUiMode !== 'desktop');
 
 const setMobileUi = (enabled: boolean) => {
   useMobileUi.value = enabled;
-  localStorage.setItem('poker_ui_mode', enabled ? 'mobile' : 'desktop');
 };
 
 // --- 移植的核心算法 (最终修复版) ---
