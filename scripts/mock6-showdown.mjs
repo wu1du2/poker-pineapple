@@ -94,6 +94,16 @@ async function main() {
 
     const page = pages[0];
     await page.waitForSelector('[data-testid="showdown-results"]');
+    await page.waitForSelector('[data-testid="result-public-board"]');
+    await page.waitForSelector('[data-testid="result-player-mine"]');
+    const resultPlayerCount = await page.locator('.result-player-card').count();
+    if (resultPlayerCount !== 6) {
+      throw new Error(`Expected 6 result players, found ${resultPlayerCount}`);
+    }
+    const publicCardCount = await page.locator('[data-testid="result-public-board"] .card-placeholder').count();
+    if (publicCardCount !== 5) {
+      throw new Error(`Expected 5 public cards in result board, found ${publicCardCount}`);
+    }
     await page.waitForTimeout(800);
 
     const finalState = await page.evaluate(() => window.__pokerDebug?.getState());
@@ -102,10 +112,24 @@ async function main() {
       const shell = document.querySelector('.mobile-game-shell');
       const results = document.querySelector('[data-testid="showdown-results"]');
       if (shell instanceof HTMLElement && results instanceof HTMLElement) {
-        shell.scrollTop = results.offsetTop;
+        const shellRect = shell.getBoundingClientRect();
+        const resultRect = results.getBoundingClientRect();
+        shell.scrollTop += resultRect.top - shellRect.top;
       }
     });
     await page.waitForTimeout(300);
+    const allResultsFit = await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
+      const players = [...document.querySelectorAll('.result-player-card')];
+      if (!(shell instanceof HTMLElement) || players.length === 0) return false;
+      const shellRect = shell.getBoundingClientRect();
+      const firstRect = players[0].getBoundingClientRect();
+      const lastRect = players[players.length - 1].getBoundingClientRect();
+      return firstRect.top >= shellRect.top && lastRect.bottom <= shellRect.bottom;
+    });
+    if (!allResultsFit) {
+      throw new Error('Expected all six compact result cards to fit in one mobile screenshot viewport');
+    }
     await page.screenshot({ path: path.join(runDir, 'final.png'), fullPage: false });
     await fs.writeFile(
       path.join(runDir, 'summary.md'),

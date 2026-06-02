@@ -61,6 +61,11 @@ const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).lengt
 const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
 const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
 const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat) => !seat));
+const resultPlayers = computed(() => {
+  return props.gameState.seats
+    .map((seat, seatIndex) => ({ seat, seatIndex }))
+    .filter((entry): entry is { seat: Player; seatIndex: number } => Boolean(entry.seat));
+});
 
 const findSettlement = (seatIndex: number) => {
   return props.settlementResults.find((result) => result.seatIndex === seatIndex);
@@ -197,21 +202,29 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       <button type="button" class="primary-action" @click="sit(firstEmptySeatIndex)">一键入座</button>
     </section>
 
-    <section class="admin-mobile-panel">
-      <button type="button" @click="control('new-game')">新开局</button>
-      <button type="button" @click="calculateAllScores">算分</button>
-    </section>
-
     <section v-if="isShowdown" class="results-panel" data-testid="showdown-results">
       <div class="panel-heading">
         <span>摊牌结果</span>
         <span v-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
       </div>
 
-      <article v-for="(seat, seatIndex) in gameState.seats" :key="seatIndex" class="result-player">
-        <template v-if="seat">
+      <div class="result-public-board" data-testid="result-public-board">
+        <PokerCard v-for="card in gameState.communityCards" :key="`result-${card.id}`" :card="card" width="34px" />
+      </div>
+
+      <div class="result-grid">
+        <article
+          v-for="{ seat, seatIndex } in resultPlayers"
+          :key="seatIndex"
+          class="result-player-card"
+          :class="{ mine: seatIndex === mySeatIndex }"
+          :data-testid="seatIndex === mySeatIndex ? 'result-player-mine' : undefined"
+        >
           <div class="result-player-head">
-            <strong>{{ seat.name }}</strong>
+            <strong>
+              {{ seat.name }}
+              <span v-if="seatIndex === mySeatIndex" class="mine-badge">我</span>
+            </strong>
             <span :class="{ positive: (findSettlement(seatIndex)?.totalDelta || 0) > 0, negative: (findSettlement(seatIndex)?.totalDelta || 0) < 0 }">
               {{ formatDelta(findSettlement(seatIndex)?.totalDelta || 0) }}
             </span>
@@ -231,12 +244,17 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
             <div class="result-cards">
               <template v-for="(card, cardIndex) in (seat.slots[slotId] || [])" :key="`${slotId}-${cardIndex}`">
                 <div v-if="card.id === 'hidden'" class="mobile-card-back"></div>
-                <PokerCard v-else :card="card" width="36px" />
+                <PokerCard v-else :card="card" width="25px" />
               </template>
             </div>
           </div>
-        </template>
-      </article>
+        </article>
+      </div>
+    </section>
+
+    <section class="admin-mobile-panel">
+      <button type="button" @click="control('new-game')">新开局</button>
+      <button type="button" @click="calculateAllScores">算分</button>
     </section>
   </main>
 </template>
@@ -262,7 +280,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .join-panel,
 .admin-mobile-panel,
 .results-panel,
-.result-player {
+.result-player-card {
   background: rgba(8, 22, 19, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -387,8 +405,8 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .mobile-card-back {
-  width: 36px;
-  height: 50px;
+  width: 25px;
+  height: 35px;
   border-style: solid;
   background: #314b85;
 }
@@ -533,15 +551,60 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .results-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.result-player {
-  padding: 8px;
+.result-public-board {
+  min-height: 48px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.result-player-card {
+  padding: 6px;
+  min-width: 0;
+}
+
+.result-player-card.mine {
+  border-color: #f8d56b;
+  box-shadow: inset 0 0 0 1px rgba(248, 213, 107, 0.45);
+  background: rgba(38, 52, 30, 0.92);
 }
 
 .result-player-head {
-  margin-bottom: 7px;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.result-player-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mine-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f8d56b;
+  color: #18241e;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .positive {
@@ -555,36 +618,51 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .result-slot {
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 6px;
+  padding: 4px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 54px;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
+  min-height: 44px;
 }
 
 .result-slot + .result-slot {
-  margin-top: 5px;
+  margin-top: 4px;
 }
 
 .result-slot-label {
   min-width: 0;
   justify-content: flex-start;
+  gap: 4px;
+}
+
+.result-slot-label strong,
+.result-slot-label em {
+  flex: 0 0 auto;
+}
+
+.result-slot-label strong {
+  font-size: 16px;
 }
 
 .result-slot-label span {
   color: #dbe9e4;
-  font-size: 12px;
-  overflow-wrap: anywhere;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .result-slot-label em {
   margin-left: auto;
   font-style: normal;
   font-weight: 800;
+  font-size: 14px;
 }
 
 .result-cards {
   display: flex;
-  gap: 3px;
+  justify-content: flex-end;
+  gap: 2px;
 }
 </style>
