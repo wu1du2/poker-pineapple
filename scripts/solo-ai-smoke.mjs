@@ -82,6 +82,14 @@ async function main() {
         [1, 2, 3].every((slotId) => seat.slots?.[slotId]?.length === 2)
       ));
     });
+    const handRailFits = await page.evaluate(() => {
+      const rail = document.querySelector('.hand-rail');
+      if (!(rail instanceof HTMLElement)) return false;
+      return rail.scrollWidth <= rail.clientWidth + 1;
+    });
+    if (!handRailFits) {
+      throw new Error('Expected all seven hand cards to fit without horizontal scrolling');
+    }
 
     for (let index = 0; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();

@@ -208,7 +208,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
           class="hand-card-btn"
           @click="clickHandCard(card)"
         >
-          <PokerCard :card="card" width="52px" />
+          <PokerCard :card="card" width="44px" />
         </button>
       </div>
     </section>
@@ -542,7 +542,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   min-height: 78px;
   overflow-x: auto;
   display: flex;
-  gap: 7px;
+  gap: 6px;
   padding-bottom: 4px;
 }
 
