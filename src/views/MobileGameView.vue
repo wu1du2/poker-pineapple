@@ -1,0 +1,590 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import PokerCard from '../components/PokerCard.vue';
+import type { SlotSettlementResult } from '../utils/pokerScoring';
+
+interface Card {
+  suit: string;
+  rank: string;
+  color: string;
+  id: string;
+}
+
+interface Player {
+  id: string;
+  name: string;
+  score: number;
+  hand: Card[] | null;
+  slots: Record<number, Card[]>;
+  shownSlots: number[];
+  isFolded: boolean;
+  isShowing: boolean;
+  isReady: boolean;
+  isAway: boolean;
+}
+
+interface GameState {
+  seats: (Player | null)[];
+  communityCards: Card[];
+  billboard: string;
+  phase?: string;
+}
+
+const props = defineProps<{
+  gameState: GameState;
+  mySeatIndex: number;
+  myName: string;
+  myHand: Card[];
+  mySlots: Record<number, Card[]>;
+  isReady: boolean;
+  calculatedResults: Record<number, Record<number, string>>;
+  winningSlots: Record<number, number[]>;
+  settlementResults: SlotSettlementResult[];
+  totalDeltaSum: number;
+  totalScore: number;
+  slotMultipliers: Record<number, string>;
+  multiplierColors: Record<number, string>;
+  checkAllSlotsFilled: () => boolean;
+  sit: (index: number) => void;
+  updateMyName: (event: Event) => void;
+  clickHandCard: (card: Card) => void;
+  clickSlotCard: (card: Card) => void;
+  toggleReady: () => void;
+  toggleAway: () => void;
+  showHand: () => void;
+  control: (action: string) => void;
+  calculateAllScores: () => void;
+  switchToDesktop: () => void;
+}>();
+
+const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
+const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
+const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
+const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat) => !seat));
+
+const findSettlement = (seatIndex: number) => {
+  return props.settlementResults.find((result) => result.seatIndex === seatIndex);
+};
+
+const isWinner = (seatIndex: number, slotId: number) => {
+  return props.winningSlots[seatIndex]?.includes(slotId) ?? false;
+};
+
+const slotDelta = (settlement: SlotSettlementResult | undefined, slotId: number) => {
+  if (!settlement) return 0;
+  if (slotId === 1) return settlement.slot1Delta;
+  if (slotId === 2) return settlement.slot2Delta;
+  return settlement.slot3Delta;
+};
+
+const formatDelta = (value: number) => {
+  if (value > 0) return `+${value}`;
+  return String(value);
+};
+
+const getMySlotCard = (slotId: number, cellIndex: number) => {
+  return props.mySlots[slotId]?.[cellIndex - 1];
+};
+
+const clickMySlotCell = (slotId: number, cellIndex: number) => {
+  const card = getMySlotCard(slotId, cellIndex);
+  if (card) props.clickSlotCard(card);
+};
+</script>
+
+<template>
+  <main class="mobile-game-shell" data-testid="mobile-game-view">
+    <header class="mobile-topbar">
+      <div>
+        <div class="mobile-title">Pineapple</div>
+        <div class="mobile-subtitle">{{ seatedPlayers }}/6 入座 · 总分 {{ totalScore }}</div>
+      </div>
+      <button class="icon-text-btn" type="button" @click="switchToDesktop">旧UI</button>
+    </header>
+
+    <section class="seat-strip" aria-label="座位">
+      <button
+        v-for="(seat, index) in gameState.seats"
+        :key="index"
+        type="button"
+        class="seat-pill"
+        :class="{ occupied: seat, mine: index === mySeatIndex, ready: seat?.isReady, away: seat?.isAway }"
+        @click="!seat && sit(index)"
+      >
+        <span class="seat-name">{{ seat ? seat.name : `座位${index + 1}` }}</span>
+        <span class="seat-meta">
+          <template v-if="seat">{{ seat.score }} · {{ seat.isAway ? '暂离' : seat.isReady ? 'Ready' : '等待' }}</template>
+          <template v-else>入座</template>
+        </span>
+      </button>
+    </section>
+
+    <section class="board-panel">
+      <div class="panel-heading">
+        <span>公共牌</span>
+        <span>{{ gameState.phase || 'PREFLOP' }}</span>
+      </div>
+      <div class="mobile-board">
+        <PokerCard v-for="card in gameState.communityCards" :key="card.id" :card="card" width="46px" />
+        <div v-for="index in Math.max(0, 5 - gameState.communityCards.length)" :key="`empty-${index}`" class="mobile-card-hole"></div>
+      </div>
+    </section>
+
+    <section v-if="mySeat" class="my-panel">
+      <div class="my-header">
+        <input class="mobile-name-input" :value="mySeat.name" @change="updateMyName" />
+        <span class="my-score">Score {{ mySeat.score }}</span>
+      </div>
+
+      <div class="mobile-slots">
+        <div
+          v-for="slotId in [1, 2, 3]"
+          :key="slotId"
+          class="mobile-slot-row"
+          :class="{ winner: isWinner(mySeatIndex, slotId) }"
+        >
+          <div class="slot-label">
+            <strong :style="{ color: multiplierColors[slotId] }">{{ slotMultipliers[slotId] }}</strong>
+            <span>{{ calculatedResults[mySeatIndex]?.[slotId] || '待摆牌' }}</span>
+          </div>
+          <div class="slot-card-cells">
+            <button
+              v-for="cellIndex in 2"
+              :key="cellIndex"
+              type="button"
+              class="slot-cell"
+              @click="clickMySlotCell(slotId, cellIndex)"
+            >
+              <PokerCard
+                v-if="getMySlotCard(slotId, cellIndex)"
+                :card="getMySlotCard(slotId, cellIndex)"
+                width="50px"
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mobile-actions">
+        <button type="button" class="secondary-action" @click="showHand">亮牌</button>
+        <button type="button" class="secondary-action" @click="toggleAway">{{ mySeat.isAway ? '回归' : '暂离' }}</button>
+        <button
+          type="button"
+          class="primary-action"
+          :class="{ ready: isReady }"
+          :disabled="!checkAllSlotsFilled()"
+          @click="toggleReady"
+        >
+          {{ isReady ? '已准备' : '准备' }}
+        </button>
+      </div>
+
+      <div class="hand-rail" aria-label="手牌">
+        <button
+          v-for="card in myHand"
+          :key="card.id"
+          type="button"
+          class="hand-card-btn"
+          @click="clickHandCard(card)"
+        >
+          <PokerCard :card="card" width="52px" />
+        </button>
+      </div>
+    </section>
+
+    <section v-else-if="firstEmptySeatIndex !== -1" class="join-panel">
+      <p>点一个空座入座，摆好三道后手动 Ready。</p>
+      <button type="button" class="primary-action" @click="sit(firstEmptySeatIndex)">一键入座</button>
+    </section>
+
+    <section class="admin-mobile-panel">
+      <button type="button" @click="control('new-game')">新开局</button>
+      <button type="button" @click="calculateAllScores">算分</button>
+    </section>
+
+    <section v-if="isShowdown" class="results-panel" data-testid="showdown-results">
+      <div class="panel-heading">
+        <span>摊牌结果</span>
+        <span v-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
+      </div>
+
+      <article v-for="(seat, seatIndex) in gameState.seats" :key="seatIndex" class="result-player">
+        <template v-if="seat">
+          <div class="result-player-head">
+            <strong>{{ seat.name }}</strong>
+            <span :class="{ positive: (findSettlement(seatIndex)?.totalDelta || 0) > 0, negative: (findSettlement(seatIndex)?.totalDelta || 0) < 0 }">
+              {{ formatDelta(findSettlement(seatIndex)?.totalDelta || 0) }}
+            </span>
+          </div>
+
+          <div
+            v-for="slotId in [1, 2, 3]"
+            :key="slotId"
+            class="result-slot"
+            :class="{ winner: isWinner(seatIndex, slotId) }"
+          >
+            <div class="result-slot-label">
+              <strong :style="{ color: multiplierColors[slotId] }">{{ slotMultipliers[slotId] }}</strong>
+              <span>{{ calculatedResults[seatIndex]?.[slotId] || '未计算' }}</span>
+              <em>{{ formatDelta(slotDelta(findSettlement(seatIndex), slotId)) }}</em>
+            </div>
+            <div class="result-cards">
+              <template v-for="(card, cardIndex) in (seat.slots[slotId] || [])" :key="`${slotId}-${cardIndex}`">
+                <div v-if="card.id === 'hidden'" class="mobile-card-back"></div>
+                <PokerCard v-else :card="card" width="36px" />
+              </template>
+            </div>
+          </div>
+        </template>
+      </article>
+    </section>
+  </main>
+</template>
+
+<style scoped>
+.mobile-game-shell {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  padding: max(10px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom));
+  background: #14382f;
+  color: #f7fbf8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-topbar,
+.board-panel,
+.my-panel,
+.join-panel,
+.admin-mobile-panel,
+.results-panel,
+.result-player {
+  background: rgba(8, 22, 19, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
+.mobile-topbar {
+  min-height: 48px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mobile-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.mobile-subtitle {
+  color: #b9ccc6;
+  font-size: 12px;
+}
+
+.icon-text-btn,
+.admin-mobile-panel button,
+.secondary-action,
+.primary-action {
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: #244b40;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.seat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.seat-pill {
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #edf7f4;
+  min-height: 48px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.seat-pill.occupied {
+  border-style: solid;
+  background: rgba(35, 74, 64, 0.88);
+}
+
+.seat-pill.mine {
+  border-color: #f8d56b;
+}
+
+.seat-pill.ready {
+  box-shadow: inset 0 -3px 0 #50c878;
+}
+
+.seat-pill.away {
+  opacity: 0.62;
+}
+
+.seat-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.seat-meta {
+  color: #b9ccc6;
+  font-size: 11px;
+}
+
+.board-panel,
+.my-panel,
+.join-panel,
+.results-panel {
+  padding: 10px;
+}
+
+.panel-heading,
+.my-header,
+.result-player-head,
+.result-slot-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-heading {
+  color: #dbe9e4;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.mobile-board {
+  min-height: 64px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mobile-card-hole,
+.mobile-card-back {
+  width: 46px;
+  height: 64px;
+  border-radius: 6px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mobile-card-back {
+  width: 36px;
+  height: 50px;
+  border-style: solid;
+  background: #314b85;
+}
+
+.my-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-name-input {
+  width: min(52vw, 220px);
+  height: 36px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  padding: 0 10px;
+  font-size: 16px;
+}
+
+.my-score {
+  color: #9bdcff;
+  font-weight: 700;
+}
+
+.mobile-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-slot-row {
+  min-height: 78px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 7px;
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) 116px;
+  gap: 8px;
+  align-items: center;
+}
+
+.mobile-slot-row.winner,
+.result-slot.winner {
+  border-color: #f8d56b;
+  background: rgba(248, 213, 107, 0.16);
+}
+
+.slot-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.slot-label strong {
+  font-size: 18px;
+}
+
+.slot-label span {
+  color: #b9ccc6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.slot-card-cells {
+  display: grid;
+  grid-template-columns: repeat(2, 56px);
+  gap: 4px;
+}
+
+.slot-cell,
+.hand-card-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.slot-cell {
+  width: 56px;
+  height: 70px;
+  border-radius: 7px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+}
+
+.mobile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.5fr;
+  gap: 7px;
+}
+
+.primary-action {
+  background: #d08a20;
+  color: #18130a;
+  font-weight: 900;
+}
+
+.primary-action.ready {
+  background: #50c878;
+}
+
+.primary-action:disabled {
+  opacity: 0.45;
+}
+
+.secondary-action {
+  background: #244b40;
+}
+
+.hand-rail {
+  min-height: 78px;
+  overflow-x: auto;
+  display: flex;
+  gap: 7px;
+  padding-bottom: 4px;
+}
+
+.hand-card-btn {
+  flex: 0 0 auto;
+}
+
+.join-panel {
+  text-align: center;
+}
+
+.join-panel p {
+  color: #dbe9e4;
+  margin: 0 0 10px;
+}
+
+.admin-mobile-panel {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.results-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.result-player {
+  padding: 8px;
+}
+
+.result-player-head {
+  margin-bottom: 7px;
+}
+
+.positive {
+  color: #69f0ae;
+}
+
+.negative {
+  color: #ff8a80;
+}
+
+.result-slot {
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.result-slot + .result-slot {
+  margin-top: 5px;
+}
+
+.result-slot-label {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.result-slot-label span {
+  color: #dbe9e4;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.result-slot-label em {
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.result-cards {
+  display: flex;
+  gap: 3px;
+}
+</style>

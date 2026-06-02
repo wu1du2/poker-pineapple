@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { buildMock6ShowdownState } from './debugMock';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +12,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, '../dist')));
 
 const SUITS = ['♠', '♥', '♣', '♦'];
@@ -43,6 +45,18 @@ const gameState = {
   billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
   phase: 'PREFLOP'
 };
+
+app.post('/debug/mock6-showdown', (_req, res) => {
+  dealTurnCount = 2;
+  const mockState = buildMock6ShowdownState();
+  gameState.seats = mockState.seats;
+  gameState.communityCards = mockState.communityCards;
+  gameState.billboard = mockState.billboard;
+  gameState.phase = mockState.phase;
+  io.emit('reset-table');
+  io.emit('update', getPublicState());
+  res.json(getPublicState());
+});
 
 io.on('connection', (socket: Socket) => {
   socket.emit('init', getPublicState());

@@ -2,10 +2,19 @@
 import { reactive, ref, onMounted, computed, watch } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
+import MobileGameView from './views/MobileGameView.vue';
 import { calculateSlotSettlement, calculateTotalSettlement } from './utils/pokerScoring';
 import type { PlayerSlotInfo, SettlementResult, SlotSettlementResult } from './utils/pokerScoring';
 
 const socket = io(); 
+
+const initialUiMode = new URLSearchParams(window.location.search).get('ui');
+const useMobileUi = ref(initialUiMode === 'mobile' || localStorage.getItem('poker_ui_mode') === 'mobile');
+
+const setMobileUi = (enabled: boolean) => {
+  useMobileUi.value = enabled;
+  localStorage.setItem('poker_ui_mode', enabled ? 'mobile' : 'desktop');
+};
 
 // --- 移植的核心算法 (最终修复版) ---
 interface CardInput {
@@ -550,10 +559,59 @@ const getSeatStyle = (index: number) => {
   const y = Math.sin(angleRad) * ry;
   return { transform: `translate(${x}px, ${y}px)` };
 };
+
+declare global {
+  interface Window {
+    __pokerDebug?: {
+      calculateAllScores: () => void;
+      switchToMobile: () => void;
+      getState: () => unknown;
+    };
+  }
+}
+
+window.__pokerDebug = {
+  calculateAllScores,
+  switchToMobile: () => setMobileUi(true),
+  getState: () => ({
+    gameState: JSON.parse(JSON.stringify(gameState)),
+    calculatedResults: calculatedResults.value,
+    settlementResults: JSON.parse(JSON.stringify(settlementResults)),
+    totalDeltaSum: totalDeltaSum.value
+  })
+};
 </script>
 
 <template>
-  <div class="table-container">
+  <MobileGameView
+    v-if="useMobileUi"
+    :game-state="gameState"
+    :my-seat-index="mySeatIndex"
+    :my-name="myName"
+    :my-hand="myHand"
+    :my-slots="mySlots"
+    :is-ready="isReady"
+    :calculated-results="calculatedResults"
+    :winning-slots="winningSlots"
+    :settlement-results="settlementResults"
+    :total-delta-sum="totalDeltaSum"
+    :total-score="totalScore"
+    :slot-multipliers="slotMultipliers"
+    :multiplier-colors="multiplierColors"
+    :check-all-slots-filled="checkAllSlotsFilled"
+    :sit="sit"
+    :update-my-name="updateMyName"
+    :click-hand-card="clickHandCard"
+    :click-slot-card="clickSlotCard"
+    :toggle-ready="toggleReady"
+    :toggle-away="toggleAway"
+    :show-hand="showHand"
+    :control="control"
+    :calculate-all-scores="calculateAllScores"
+    :switch-to-desktop="() => setMobileUi(false)"
+  />
+  <div v-else class="table-container">
+    <button class="ui-switch-btn" @click="setMobileUi(true)">竖屏UI</button>
     <button class="fixed-reset-btn" @click="handleHardReset">⚠ 重置服务</button>
 
     <div class="billboard-container">
@@ -824,11 +882,13 @@ body { background: #111; color: white; margin: 0; font-family: sans-serif; overf
 
 .fixed-reset-btn { position: fixed; top: 15px; left: 15px; z-index: 1000; background: #b71c1c; color: #ffcdd2; border: 1px solid #e53935; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
 .fixed-reset-btn:hover { background: #d32f2f; transform: scale(1.05); }
+.ui-switch-btn { position: fixed; top: 15px; left: 150px; z-index: 1000; background: #00695c; color: #e0f2f1; border: 1px solid #26a69a; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: all 0.2s; }
+.ui-switch-btn:hover { background: #00897b; transform: scale(1.05); }
 
 .billboard-container {
   position: fixed;
   top: 15px;
-  left: 150px; 
+  left: 250px; 
   z-index: 900;
 }
 .billboard-text {
