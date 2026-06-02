@@ -62,3 +62,12 @@ export function arrangeAiHandInOrder(player: AiPlayer): void {
   player.isShowing = false;
   player.isReady = true;
 }
+
+export function revealAiPlayers(seats: (AiPlayer | null)[]): void {
+  seats.forEach((seat) => {
+    if (seat?.isBot && !seat.isAway) {
+      seat.isShowing = true;
+      seat.shownSlots = [1, 2, 3];
+    }
+  });
+}

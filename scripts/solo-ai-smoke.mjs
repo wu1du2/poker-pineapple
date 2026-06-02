@@ -82,6 +82,38 @@ async function main() {
       ));
     });
 
+    for (let index = 0; index < 6; index++) {
+      await page.locator('.hand-rail .hand-card-btn').first().click();
+    }
+    await page.getByRole('button', { name: '准备' }).click();
+    await page.waitForSelector('[data-testid="showdown-results"]');
+    await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState()?.gameState;
+      if (!state || state.phase !== 'SHOWDOWN') return false;
+      const seats = state.seats.filter(Boolean);
+      const aiSeats = seats.filter((seat) => seat.isBot);
+      return aiSeats.length === 5 && aiSeats.every((seat) => (
+        seat.isShowing &&
+        [1, 2, 3].every((slotId) => seat.slots?.[slotId]?.every((card) => card.id !== 'hidden'))
+      ));
+    });
+    await page.waitForFunction(() => {
+      const debugState = window.__pokerDebug?.getState();
+      return debugState?.gameState?.communityCards?.length === 5 &&
+        debugState?.settlementResults?.length === 6 &&
+        document.querySelectorAll('.result-player-card').length === 6;
+    });
+    await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
+      const results = document.querySelector('[data-testid="showdown-results"]');
+      if (shell instanceof HTMLElement && results instanceof HTMLElement) {
+        const shellRect = shell.getBoundingClientRect();
+        const resultRect = results.getBoundingClientRect();
+        shell.scrollTop += resultRect.top - shellRect.top;
+      }
+    });
+    await page.waitForTimeout(300);
+
     const finalState = await page.evaluate(() => window.__pokerDebug?.getState());
     await fs.writeFile(path.join(runDir, 'solo-ai-state.json'), JSON.stringify(finalState, null, 2));
     await page.screenshot({ path: path.join(runDir, 'solo-ai.png'), fullPage: false });

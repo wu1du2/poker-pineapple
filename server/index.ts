@@ -4,7 +4,7 @@ import { Server, Socket } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
-import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
+import { arrangeAiHandInOrder, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -328,6 +328,8 @@ io.on('connection', (socket: Socket) => {
       const allReady = gameState.seats.every(seat => seat === null || seat.isReady || seat.isAway);
       if (allReady) {
         gameState.phase = 'SHOWDOWN'; // 切换阶段为 SHOWDOWN
+        revealAiPlayers(gameState.seats);
+        io.emit('update', getPublicState());
         io.emit('all-players-ready');
       }
     }
