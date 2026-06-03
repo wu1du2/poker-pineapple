@@ -237,17 +237,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
     <section v-if="isShowdown" class="results-panel" data-testid="showdown-results">
       <div class="panel-heading">
         <span>摊牌结果</span>
-        <button
-          v-if="mySeat"
-          type="button"
-          class="showdown-ready-action"
-          :class="{ ready: primaryActionActive }"
-          :disabled="primaryActionDisabled"
-          @click="toggleReady"
-        >
-          {{ primaryActionLabel }}
-        </button>
-        <span v-else-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
+        <span v-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
       </div>
 
       <div class="result-public-board" data-testid="result-public-board">
@@ -294,10 +284,28 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
     </section>
 
+    <section v-if="isShowdown && mySeat" class="showdown-bottom-actions">
+      <button
+        type="button"
+        class="primary-action showdown-ready-action"
+        :class="{ ready: primaryActionActive }"
+        :disabled="primaryActionDisabled"
+        data-testid="showdown-bottom-ready"
+        @click="toggleReady"
+      >
+        {{ primaryActionLabel }}
+      </button>
+    </section>
+
     <section class="admin-mobile-panel">
       <button type="button" :disabled="!canFillAi" @click="control('fill-ai')">加满AI</button>
-      <button type="button" @click="control('new-game')">调试发牌</button>
-      <button type="button" @click="calculateAllScores">手动算分</button>
+      <details class="debug-menu">
+        <summary aria-label="更多调试操作">...</summary>
+        <div class="debug-menu-content">
+          <button type="button" @click="control('new-game')">调试发牌</button>
+          <button type="button" @click="calculateAllScores">手动算分</button>
+        </div>
+      </details>
     </section>
   </main>
 </template>
@@ -323,6 +331,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .join-panel,
 .round-ready-panel,
 .admin-mobile-panel,
+.showdown-bottom-actions,
 .results-panel,
 .result-player-card {
   background: rgba(8, 22, 19, 0.78);
@@ -563,22 +572,18 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   opacity: 0.45;
 }
 
-.showdown-ready-action {
-  border: 0;
-  border-radius: 7px;
-  min-height: 32px;
-  padding: 0 10px;
-  background: #d08a20;
-  color: #18130a;
-  font-weight: 900;
-}
-
-.showdown-ready-action.ready {
-  background: #50c878;
-}
-
 .secondary-action {
   background: #244b40;
+}
+
+.showdown-bottom-actions {
+  padding: 8px;
+}
+
+.showdown-ready-action {
+  width: 100%;
+  min-height: 46px;
+  font-size: 18px;
 }
 
 .hand-rail {
@@ -605,12 +610,48 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .admin-mobile-panel {
   padding: 8px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 44px;
   gap: 8px;
 }
 
 .admin-mobile-panel button:disabled {
   opacity: 0.45;
+}
+
+.debug-menu {
+  position: relative;
+}
+
+.debug-menu summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 38px;
+  border-radius: 7px;
+  background: #244b40;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.debug-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.debug-menu-content {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 3;
+  width: 128px;
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(8, 22, 19, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 6px;
 }
 
 .results-panel {

@@ -117,6 +117,22 @@ async function main() {
     if (!(await nextRoundReadyButton.isEnabled())) {
       throw new Error('Expected next-round ready button to be enabled after showdown');
     }
+    const readyButtonInBottomBar = await page.evaluate(() => {
+      const button = document.querySelector('[data-testid="showdown-bottom-ready"]');
+      const results = document.querySelector('[data-testid="showdown-results"]');
+      if (!(button instanceof HTMLElement) || !(results instanceof HTMLElement)) return false;
+      return button.getBoundingClientRect().top >= results.getBoundingClientRect().bottom;
+    });
+    if (!readyButtonInBottomBar) {
+      throw new Error('Expected next-round ready button below showdown results');
+    }
+    const readyButtonInResultHeader = await page.evaluate(() => {
+      const header = document.querySelector('[data-testid="showdown-results"] .panel-heading');
+      return Boolean(header?.querySelector('button'));
+    });
+    if (readyButtonInResultHeader) {
+      throw new Error('Expected showdown header to be result-only without ready button');
+    }
     const resultsInFirstViewport = await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
       const results = document.querySelector('[data-testid="showdown-results"]');
