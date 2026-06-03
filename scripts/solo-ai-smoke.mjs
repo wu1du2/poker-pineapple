@@ -117,6 +117,27 @@ async function main() {
     if (!(await nextRoundReadyButton.isEnabled())) {
       throw new Error('Expected next-round ready button to be enabled after showdown');
     }
+    const resultsInFirstViewport = await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
+      const results = document.querySelector('[data-testid="showdown-results"]');
+      if (!(shell instanceof HTMLElement) || !(results instanceof HTMLElement)) return false;
+      shell.scrollTop = 0;
+      const shellRect = shell.getBoundingClientRect();
+      const resultRect = results.getBoundingClientRect();
+      return resultRect.top >= shellRect.top && resultRect.top < shellRect.bottom;
+    });
+    if (!resultsInFirstViewport) {
+      throw new Error('Expected showdown results to appear in the first mobile viewport');
+    }
+    const arrangingPanelHiddenInShowdown = await page.evaluate(() => {
+      const panel = document.querySelector('.my-panel');
+      if (!(panel instanceof HTMLElement)) return true;
+      const rect = panel.getBoundingClientRect();
+      return rect.width === 0 || rect.height === 0;
+    });
+    if (!arrangingPanelHiddenInShowdown) {
+      throw new Error('Expected arranging panel to be hidden on showdown screen');
+    }
     await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
       const results = document.querySelector('[data-testid="showdown-results"]');

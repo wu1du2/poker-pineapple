@@ -151,7 +151,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
     </section>
 
-    <section v-if="mySeat" class="my-panel">
+    <section v-if="isArranging && mySeat" class="my-panel">
       <div class="my-header">
         <input class="mobile-name-input" :value="mySeat.name" @change="updateMyName" />
         <span class="my-score">Score {{ mySeat.score }}</span>
@@ -213,15 +213,41 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
     </section>
 
-    <section v-else-if="firstEmptySeatIndex !== -1" class="join-panel">
+    <section v-else-if="!mySeat && firstEmptySeatIndex !== -1" class="join-panel">
       <p>点一个空座入座，准备后开始下一局。</p>
       <button type="button" class="primary-action" @click="sit(firstEmptySeatIndex)">一键入座</button>
+    </section>
+
+    <section v-if="!isArranging && !isShowdown && mySeat" class="round-ready-panel">
+      <div>
+        <strong>{{ mySeat.name }}</strong>
+        <span>Score {{ mySeat.score }}</span>
+      </div>
+      <button
+        type="button"
+        class="primary-action"
+        :class="{ ready: primaryActionActive }"
+        :disabled="primaryActionDisabled"
+        @click="toggleReady"
+      >
+        {{ primaryActionLabel }}
+      </button>
     </section>
 
     <section v-if="isShowdown" class="results-panel" data-testid="showdown-results">
       <div class="panel-heading">
         <span>摊牌结果</span>
-        <span v-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
+        <button
+          v-if="mySeat"
+          type="button"
+          class="showdown-ready-action"
+          :class="{ ready: primaryActionActive }"
+          :disabled="primaryActionDisabled"
+          @click="toggleReady"
+        >
+          {{ primaryActionLabel }}
+        </button>
+        <span v-else-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
       </div>
 
       <div class="result-public-board" data-testid="result-public-board">
@@ -295,6 +321,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .board-panel,
 .my-panel,
 .join-panel,
+.round-ready-panel,
 .admin-mobile-panel,
 .results-panel,
 .result-player-card {
@@ -386,12 +413,14 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .board-panel,
 .my-panel,
 .join-panel,
+.round-ready-panel,
 .results-panel {
   padding: 10px;
 }
 
 .panel-heading,
 .my-header,
+.round-ready-panel,
 .result-player-head,
 .result-slot-label {
   display: flex;
@@ -532,6 +561,20 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .primary-action:disabled {
   opacity: 0.45;
+}
+
+.showdown-ready-action {
+  border: 0;
+  border-radius: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: #d08a20;
+  color: #18130a;
+  font-weight: 900;
+}
+
+.showdown-ready-action.ready {
+  background: #50c878;
 }
 
 .secondary-action {
