@@ -61,6 +61,7 @@ const props = defineProps<{
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
 const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
 const isArranging = computed(() => props.gameState.phase === 'PLAYING');
+const isInRound = computed(() => isArranging.value || isShowdown.value);
 const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
 const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat) => !seat));
 const canFillAi = computed(() => Boolean(mySeat.value) && firstEmptySeatIndex.value !== -1 && !isArranging.value);
@@ -117,10 +118,9 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <div class="mobile-title">Pineapple</div>
         <div class="mobile-subtitle">{{ seatedPlayers }}/6 入座 · 总分 {{ totalScore }}</div>
       </div>
-      <button class="icon-text-btn" type="button" @click="switchToDesktop">旧UI</button>
     </header>
 
-    <section class="seat-strip" aria-label="座位">
+    <section class="seat-strip" :class="{ compact: isInRound }" aria-label="座位">
       <button
         v-for="(seat, index) in gameState.seats"
         :key="index"
@@ -297,7 +297,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </button>
     </section>
 
-    <section class="admin-mobile-panel">
+    <section v-if="!isArranging" class="admin-mobile-panel">
       <button type="button" :disabled="!canFillAi" @click="control('fill-ai')">加满AI</button>
       <details class="debug-menu">
         <summary aria-label="更多调试操作">...</summary>
@@ -322,7 +322,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   color: #f7fbf8;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .mobile-topbar,
@@ -340,15 +340,15 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .mobile-topbar {
-  min-height: 48px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 5px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
 .mobile-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -375,6 +375,15 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   gap: 6px;
 }
 
+.seat-strip.compact {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  min-height: 30px;
+  align-items: center;
+  padding-bottom: 1px;
+}
+
 .seat-pill {
   border: 1px dashed rgba(255, 255, 255, 0.28);
   border-radius: 8px;
@@ -385,6 +394,29 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+}
+
+.seat-strip.compact .seat-pill {
+  flex: 0 0 auto;
+  min-width: 94px;
+  min-height: 28px;
+  padding: 0 7px;
+  border-radius: 7px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.seat-strip.compact .seat-name {
+  max-width: 46px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.seat-strip.compact .seat-meta {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .seat-pill.occupied {

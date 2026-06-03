@@ -54,7 +54,7 @@ async function main() {
 
     const browser = await chromium.launch();
     const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
+      viewport: { width: 390, height: 740 },
       deviceScaleFactor: 2,
       isMobile: true
     });
@@ -89,6 +89,19 @@ async function main() {
     });
     if (!handRailFits) {
       throw new Error('Expected all seven hand cards to fit without horizontal scrolling');
+    }
+    const arrangingFitsShortViewport = await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
+      const hand = document.querySelector('.hand-rail');
+      const done = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('牌放好了 done'));
+      if (!(shell instanceof HTMLElement) || !(hand instanceof HTMLElement) || !(done instanceof HTMLElement)) return false;
+      const shellRect = shell.getBoundingClientRect();
+      const handRect = hand.getBoundingClientRect();
+      const doneRect = done.getBoundingClientRect();
+      return handRect.bottom <= shellRect.bottom && doneRect.bottom <= shellRect.bottom && shell.scrollHeight <= shell.clientHeight + 12;
+    });
+    if (!arrangingFitsShortViewport) {
+      throw new Error('Expected arranging view controls and hand cards to fit in a 390x740 viewport');
     }
 
     for (let index = 0; index < 6; index++) {
