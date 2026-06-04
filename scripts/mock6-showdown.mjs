@@ -105,6 +105,17 @@ async function main() {
     if (publicCardCount !== 5) {
       throw new Error(`Expected 5 public cards in result board, found ${publicCardCount}`);
     }
+    const resultSlotCardCount = await page.evaluate(() => {
+      return [...document.querySelectorAll('.result-slot .result-cards .card-placeholder')]
+        .filter((card) => {
+          if (!(card instanceof HTMLElement)) return false;
+          const rect = card.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }).length;
+    });
+    if (resultSlotCardCount !== 36) {
+      throw new Error(`Expected all 36 placed cards in compact results, found ${resultSlotCardCount}`);
+    }
     const showdownLayout = await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
       if (shell instanceof HTMLElement) shell.scrollTop = 0;

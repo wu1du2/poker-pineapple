@@ -296,7 +296,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
             <div class="result-cards compact-result-cards">
               <template v-for="(card, cardIndex) in (seat.slots[slotId] || [])" :key="`${slotId}-${cardIndex}`">
                 <div v-if="card.id === 'hidden'" class="mobile-card-back"></div>
-                <PokerCard v-else :card="card" width="20px" />
+                <PokerCard v-else :card="card" width="16px" />
               </template>
             </div>
           </div>
@@ -833,7 +833,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 3px 4px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 34px;
   align-items: center;
   gap: 3px;
   min-height: 34px;
@@ -878,6 +878,6 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .compact-result-cards {
-  display: none;
+  display: flex;
 }
 </style>
