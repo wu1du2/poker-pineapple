@@ -70,9 +70,17 @@ async function main() {
 
     const page = await context.newPage();
     await page.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'domcontentloaded' });
+    const viewportContent = await page.locator('meta[name="viewport"]').getAttribute('content');
+    if (!viewportContent?.includes('user-scalable=no')) {
+      throw new Error(`Expected viewport to disable user scaling, got "${viewportContent}"`);
+    }
     await page.waitForSelector('[data-testid="room-gate"]');
     await page.getByTestId('create-room-button').click();
     await page.waitForSelector('[data-testid="mobile-game-view"]');
+    const gameTouchAction = await page.getByTestId('mobile-game-view').evaluate((element) => getComputedStyle(element).touchAction);
+    if (gameTouchAction !== 'manipulation') {
+      throw new Error(`Expected mobile game to disable double-tap zoom via touch-action, got "${gameTouchAction}"`);
+    }
     const roomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
     if (!/^房间 \d{6}$/.test(roomChipText || '')) {
       throw new Error(`Expected top room id chip, got "${roomChipText}"`);

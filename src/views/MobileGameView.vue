@@ -361,6 +361,16 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mobile-game-shell button,
+.mobile-game-shell summary,
+.mobile-game-shell .card-placeholder {
+  touch-action: manipulation;
 }
 
 .mobile-topbar,
