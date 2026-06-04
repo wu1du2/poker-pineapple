@@ -103,6 +103,21 @@ async function main() {
     if (!arrangingFitsShortViewport) {
       throw new Error('Expected arranging view controls and hand cards to fit in a 390x740 viewport');
     }
+    const compactSeatsFit = await page.evaluate(() => {
+      const strip = document.querySelector('.seat-strip.compact');
+      if (!(strip instanceof HTMLElement)) return false;
+      const seatPills = [...strip.querySelectorAll('.seat-pill')].filter((seat) => seat instanceof HTMLElement);
+      if (seatPills.length !== 6) return false;
+      const stripRect = strip.getBoundingClientRect();
+      return strip.scrollWidth <= strip.clientWidth + 1 &&
+        seatPills.every((seat) => {
+          const rect = seat.getBoundingClientRect();
+          return rect.left >= stripRect.left && rect.right <= stripRect.right;
+        });
+    });
+    if (!compactSeatsFit) {
+      throw new Error('Expected all six in-round seat statuses to fit without horizontal scrolling');
+    }
 
     for (let index = 0; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();

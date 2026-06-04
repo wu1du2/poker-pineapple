@@ -75,6 +75,11 @@ const primaryActionDisabled = computed(() => {
   if (!isArranging.value) return false;
   return !mySeat.value.isDone && !props.checkAllSlotsFilled();
 });
+const seatStatusLabel = (seat: Player) => {
+  if (seat.isAway) return '暂离';
+  if (isArranging.value) return seat.isDone ? 'Done' : '摆牌';
+  return seat.isReady ? 'Ready' : '等待';
+};
 const resultPlayers = computed(() => {
   return props.gameState.seats
     .map((seat, seatIndex) => ({ seat, seatIndex }))
@@ -127,13 +132,14 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         type="button"
         class="seat-pill"
         :class="{ occupied: seat, mine: index === mySeatIndex, ready: !isArranging && seat?.isReady, done: isArranging && seat?.isDone, away: seat?.isAway }"
+        :aria-label="seat ? `${seat.name} ${seat.score} ${seatStatusLabel(seat)}` : `座位${index + 1} 入座`"
         @click="!seat && sit(index)"
       >
         <span class="seat-name">{{ seat ? seat.name : `座位${index + 1}` }}</span>
         <span class="seat-meta">
           <template v-if="seat">
-            {{ seat.score }} ·
-            {{ seat.isAway ? '暂离' : isArranging ? (seat.isDone ? 'Done' : '摆牌') : (seat.isReady ? 'Ready' : '等待') }}
+            <template v-if="isInRound">{{ seat.score }}</template>
+            <template v-else>{{ seat.score }} · {{ seatStatusLabel(seat) }}</template>
           </template>
           <template v-else>入座</template>
         </span>
@@ -146,7 +152,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <span>{{ gameState.phase || 'PREFLOP' }}</span>
       </div>
       <div class="mobile-board">
-        <PokerCard v-for="card in gameState.communityCards" :key="card.id" :card="card" width="46px" />
+        <PokerCard v-for="card in gameState.communityCards" :key="card.id" :card="card" width="42px" />
         <div v-for="index in Math.max(0, 5 - gameState.communityCards.length)" :key="`empty-${index}`" class="mobile-card-hole"></div>
       </div>
     </section>
@@ -179,7 +185,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
               <PokerCard
                 v-if="getMySlotCard(slotId, cellIndex)"
                 :card="getMySlotCard(slotId, cellIndex)"
-                width="50px"
+                width="46px"
               />
             </button>
           </div>
@@ -208,7 +214,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
           class="hand-card-btn"
           @click="clickHandCard(card)"
         >
-          <PokerCard :card="card" width="44px" />
+          <PokerCard :card="card" width="42px" />
         </button>
       </div>
     </section>
@@ -376,12 +382,10 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .seat-strip.compact {
-  display: flex;
-  gap: 5px;
-  overflow-x: auto;
-  min-height: 30px;
-  align-items: center;
-  padding-bottom: 1px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  overflow: visible;
 }
 
 .seat-pill {
@@ -397,24 +401,25 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .seat-strip.compact .seat-pill {
-  flex: 0 0 auto;
-  min-width: 94px;
-  min-height: 28px;
-  padding: 0 7px;
-  border-radius: 7px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: 6px;
   flex-direction: row;
   align-items: center;
+  justify-content: space-between;
   gap: 4px;
 }
 
 .seat-strip.compact .seat-name {
-  max-width: 46px;
+  max-width: 72px;
   font-size: 11px;
   line-height: 1;
 }
 
 .seat-strip.compact .seat-meta {
   font-size: 10px;
+  font-weight: 800;
   line-height: 1;
   white-space: nowrap;
 }
@@ -477,16 +482,16 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .mobile-board {
-  min-height: 64px;
+  min-height: 58px;
   display: flex;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .mobile-card-hole,
 .mobile-card-back {
-  width: 46px;
-  height: 64px;
+  width: 42px;
+  height: 58px;
   border-radius: 6px;
   border: 1px dashed rgba(255, 255, 255, 0.24);
   background: rgba(255, 255, 255, 0.06);
@@ -528,13 +533,13 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .mobile-slot-row {
-  min-height: 78px;
+  min-height: 70px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
   padding: 7px;
   display: grid;
-  grid-template-columns: minmax(88px, 1fr) 116px;
+  grid-template-columns: minmax(88px, 1fr) 108px;
   gap: 8px;
   align-items: center;
 }
@@ -566,7 +571,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .slot-card-cells {
   display: grid;
-  grid-template-columns: repeat(2, 56px);
+  grid-template-columns: repeat(2, 52px);
   gap: 4px;
 }
 
@@ -578,8 +583,8 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .slot-cell {
-  width: 56px;
-  height: 70px;
+  width: 52px;
+  height: 64px;
   border-radius: 7px;
   border: 1px dashed rgba(255, 255, 255, 0.22);
 }
@@ -619,7 +624,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .hand-rail {
-  min-height: 78px;
+  min-height: 62px;
   overflow-x: auto;
   display: flex;
   gap: 6px;
