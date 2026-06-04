@@ -593,10 +593,9 @@ window.__pokerDebug = {
     :click-slot-card="clickSlotCard"
     :toggle-ready="toggleReady"
     :toggle-away="toggleAway"
-    :show-hand="showHand"
     :control="control"
     :calculate-all-scores="calculateAllScores"
-    :switch-to-desktop="() => setMobileUi(false)"
+    :reset-game="handleHardReset"
   />
   <div v-else class="table-container">
     <button class="ui-switch-btn" @click="setMobileUi(true)">竖屏UI</button>

@@ -118,6 +118,18 @@ async function main() {
     if (!compactSeatsFit) {
       throw new Error('Expected all six in-round seat statuses to fit without horizontal scrolling');
     }
+    const simplifiedActionsVisible = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim() || '');
+      const topMenu = document.querySelector('[data-testid="mobile-top-menu"]');
+      const topMenuText = topMenu?.textContent || '';
+      return !buttons.includes('亮牌') &&
+        Boolean(topMenu) &&
+        topMenuText.includes('重置游戏') &&
+        topMenuText.includes('教程');
+    });
+    if (!simplifiedActionsVisible) {
+      throw new Error('Expected mobile UI to remove reveal button and expose reset/tutorial in top menu');
+    }
 
     for (let index = 0; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();

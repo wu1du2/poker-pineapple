@@ -52,10 +52,9 @@ const props = defineProps<{
   clickSlotCard: (card: Card) => void;
   toggleReady: () => void;
   toggleAway: () => void;
-  showHand: () => void;
   control: (action: string) => void;
   calculateAllScores: () => void;
-  switchToDesktop: () => void;
+  resetGame: () => void;
 }>();
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
@@ -123,6 +122,13 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <div class="mobile-title">Pineapple</div>
         <div class="mobile-subtitle">{{ seatedPlayers }}/6 入座 · 总分 {{ totalScore }}</div>
       </div>
+      <details class="top-menu" data-testid="mobile-top-menu">
+        <summary aria-label="更多操作">...</summary>
+        <div class="top-menu-content">
+          <button type="button" @click="resetGame">重置游戏</button>
+          <button type="button" disabled>教程</button>
+        </div>
+      </details>
     </header>
 
     <section class="seat-strip" :class="{ compact: isInRound }" aria-label="座位">
@@ -193,7 +199,6 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
 
       <div class="mobile-actions">
-        <button type="button" class="secondary-action" @click="showHand">亮牌</button>
         <button type="button" class="secondary-action" @click="toggleAway">{{ mySeat.isAway ? '回归' : '暂离' }}</button>
         <button
           type="button"
@@ -365,6 +370,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .icon-text-btn,
 .admin-mobile-panel button,
+.top-menu button,
 .secondary-action,
 .primary-action {
   border: 0;
@@ -373,6 +379,48 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   background: #244b40;
   min-height: 38px;
   padding: 0 12px;
+}
+
+.top-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.top-menu summary {
+  list-style: none;
+  cursor: pointer;
+  width: 38px;
+  height: 34px;
+  border-radius: 7px;
+  background: #244b40;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.top-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.top-menu-content {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 4;
+  width: 128px;
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(8, 22, 19, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 6px;
+}
+
+.top-menu button:disabled {
+  opacity: 0.45;
 }
 
 .seat-strip {
@@ -591,7 +639,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .mobile-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.5fr;
+  grid-template-columns: 1fr 1.5fr;
   gap: 7px;
 }
 
