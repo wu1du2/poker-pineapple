@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { arrangeAiHandInOrder, createAiPlayer, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
+import { createPlayerState } from './playerTypes';
 
 const card = (id: string) => ({ id, suit: '♠', rank: id, color: 'black' });
 
@@ -13,7 +14,7 @@ describe('AI player helpers', () => {
 
   it('fills empty seats with named AI players without replacing humans', () => {
     const seats = [
-      { id: 'human-1', token: 'token-1', name: 'Human', score: 12, hand: [], slots: { 1: [], 2: [], 3: [] }, shownSlots: [], isFolded: false, isShowing: false, isReady: false, isAway: false },
+      { ...createPlayerState({ id: 'human-1', token: 'token-1', name: 'Human' }), score: 12 },
       null,
       null
     ];
@@ -30,19 +31,10 @@ describe('AI player helpers', () => {
 
   it('pushes the first six AI cards into slots in order and leaves one hand card', () => {
     const player = {
-      id: 'ai-1',
-      token: 'ai-token-1',
-      name: 'AI 1',
-      score: 0,
+      ...createPlayerState({ id: 'ai-1', token: 'ai-token-1', name: 'AI 1', isBot: true }),
       hand: ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map(card),
-      slots: { 1: [], 2: [], 3: [] },
-      shownSlots: [],
-      isFolded: false,
-      isShowing: false,
       isReady: false,
-      isDone: false,
-      isAway: false,
-      isBot: true
+      isDone: false
     };
 
     arrangeAiHandInOrder(player);
@@ -58,8 +50,8 @@ describe('AI player helpers', () => {
 
   it('reveals AI players at showdown without revealing human players', () => {
     const seats = [
-      { id: 'human-1', token: 'token-1', name: 'Human', score: 0, hand: [], slots: { 1: [], 2: [], 3: [] }, shownSlots: [], isFolded: false, isShowing: false, isReady: true, isAway: false },
-      { id: 'ai-2', token: 'ai-token-2', name: 'AI 2', score: 0, hand: [], slots: { 1: [], 2: [], 3: [] }, shownSlots: [], isFolded: false, isShowing: false, isReady: true, isAway: false, isBot: true }
+      createPlayerState({ id: 'human-1', token: 'token-1', name: 'Human' }),
+      createPlayerState({ id: 'ai-2', token: 'ai-token-2', name: 'AI 2', isBot: true })
     ];
 
     revealAiPlayers(seats);

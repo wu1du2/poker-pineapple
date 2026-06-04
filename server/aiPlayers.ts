@@ -1,45 +1,15 @@
-export interface AiCard {
-  id: string;
-  suit: string;
-  rank: string;
-  color: string;
-}
+import { createPlayerState, type Player } from './playerTypes';
 
-export interface AiPlayer {
-  id: string;
-  token: string;
-  name: string;
-  score: number;
-  hand: AiCard[];
-  slots: Record<number, AiCard[]>;
-  shownSlots: number[];
-  isFolded: boolean;
-  isShowing: boolean;
-  isReady: boolean;
-  isDone: boolean;
-  isAway: boolean;
-  isBot?: boolean;
-}
-
-export function createAiPlayer(seatIndex: number): AiPlayer {
-  return {
+export function createAiPlayer(seatIndex: number): Player {
+  return createPlayerState({
     id: `ai-${seatIndex}`,
     token: `ai-token-${seatIndex}`,
     name: `AI ${seatIndex + 1}`,
-    score: 0,
-    hand: [],
-    slots: { 1: [], 2: [], 3: [] },
-    shownSlots: [],
-    isFolded: false,
-    isShowing: false,
-    isReady: true,
-    isDone: false,
-    isAway: false,
     isBot: true
-  };
+  });
 }
 
-export function fillEmptySeatsWithAi(seats: (AiPlayer | null)[]): number {
+export function fillEmptySeatsWithAi(seats: (Player | null)[]): number {
   let added = 0;
   seats.forEach((seat, index) => {
     if (!seat) {
@@ -50,7 +20,7 @@ export function fillEmptySeatsWithAi(seats: (AiPlayer | null)[]): number {
   return added;
 }
 
-export function arrangeAiHandInOrder(player: AiPlayer): void {
+export function arrangeAiHandInOrder(player: Player): void {
   if (!player.isBot) return;
   const arranged = player.hand.slice(0, 6);
   player.slots = {
@@ -66,7 +36,7 @@ export function arrangeAiHandInOrder(player: AiPlayer): void {
   player.isDone = true;
 }
 
-export function revealAiPlayers(seats: (AiPlayer | null)[]): void {
+export function revealAiPlayers(seats: (Player | null)[]): void {
   seats.forEach((seat) => {
     if (seat?.isBot && !seat.isAway) {
       seat.isShowing = true;

@@ -1,27 +1,11 @@
-export interface DebugCard {
-  suit: string;
-  rank: string;
-  color: string;
-  id: string;
-}
+import type { Card, Player } from './playerTypes';
 
-export interface DebugSeat {
-  id: string;
-  token: string;
-  name: string;
-  score: number;
-  hand: DebugCard[];
-  slots: Record<number, DebugCard[]>;
-  shownSlots: number[];
-  isFolded: boolean;
-  isShowing: boolean;
-  isReady: boolean;
-  isAway: boolean;
-}
+export type DebugCard = Card;
+export type DebugSeat = Player;
 
 export interface DebugGameState {
   seats: DebugSeat[];
-  communityCards: DebugCard[];
+  communityCards: Card[];
   billboard: string;
   phase: string;
 }
@@ -74,7 +58,9 @@ export function buildMock6ShowdownState(): DebugGameState {
       isFolded: false,
       isShowing: true,
       isReady: true,
-      isAway: false
+      isDone: true,
+      isAway: false,
+      isBot: false
     });
   }
 

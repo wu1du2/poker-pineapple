@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
+import { createPlayerState, type Card, type Player } from './playerTypes';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +21,7 @@ const SUITS = ['♠', '♥', '♣', '♦'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
 class Deck {
-  cards: any[] = [];
+  cards: Card[] = [];
   constructor() { this.reset(); }
   reset() {
     this.cards = [];
@@ -31,7 +32,7 @@ class Deck {
       [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
     }
   }
-  deal() { return this.cards.pop(); }
+  deal() { return this.cards.pop() as Card; }
 }
 
 const deck = new Deck();
@@ -40,14 +41,14 @@ const SEAT_COUNT = 6;
 let dealTurnCount = 0; // 新增：发牌计数
 
 const gameState = {
-  seats: new Array(SEAT_COUNT).fill(null) as any[],
-  communityCards: [] as any[],
+  seats: new Array(SEAT_COUNT).fill(null) as (Player | null)[],
+  communityCards: [] as Card[],
   // dealerIndex: -1, // 移除庄家索引
   billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
   phase: 'PREFLOP'
 };
 
-function isActiveSeat(seat: any) {
+function isActiveSeat(seat: Player | null) {
   return Boolean(seat && !seat.isAway);
 }
 
@@ -63,7 +64,7 @@ function areAllActiveDone() {
   return hasActivePlayers() && gameState.seats.every(seat => seat === null || seat.isAway || seat.isDone);
 }
 
-function isSeatFullyArranged(seat: any) {
+function isSeatFullyArranged(seat: Player) {
   return [1, 2, 3].every(slotId => (seat.slots?.[slotId]?.length || 0) === 2);
 }
 
@@ -162,20 +163,11 @@ io.on('connection', (socket: Socket) => {
   socket.on('sit', ({ name, seatIndex, token }) => {
     if (!gameState.seats[seatIndex]) {
       // const isFirstPlayer = gameState.seats.every(s => s === null); // 移除首位玩家判断
-      gameState.seats[seatIndex] = {
+      gameState.seats[seatIndex] = createPlayerState({
         id: socket.id,
         token: token, // 绑定 Token
-        name,
-        score: 0, 
-        hand: [], 
-        slots: { 1: [], 2: [], 3: [] },
-        shownSlots: [],
-        isFolded: false,
-        isShowing: false,
-        isReady: false,
-        isDone: false,
-        isAway: false // 新增：暂离状态
-      };
+        name
+      });
       // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
       io.emit('update', getPublicState());
     }
@@ -253,7 +245,7 @@ io.on('connection', (socket: Socket) => {
 
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
-    let card = null;
+    let card: Card | null = null;
 
     if (cardIndex !== -1) {
       card = p.hand[cardIndex];
@@ -383,7 +375,7 @@ function getPublicState() {
     seats: gameState.seats.map(s => {
       if (!s) return null;
       
-      const publicSlots: any = { 1: [], 2: [], 3: [] };
+      const publicSlots: Record<number, Partial<Card>[]> = { 1: [], 2: [], 3: [] };
       for (let i = 1; i <= 3; i++) {
         const isSlotShown = s.isShowing || (s.shownSlots && s.shownSlots.includes(i));
         if (isSlotShown) {
