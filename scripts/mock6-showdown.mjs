@@ -105,6 +105,28 @@ async function main() {
     if (publicCardCount !== 5) {
       throw new Error(`Expected 5 public cards in result board, found ${publicCardCount}`);
     }
+    const showdownLayout = await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
+      if (shell instanceof HTMLElement) shell.scrollTop = 0;
+      const boardPanel = document.querySelector('.board-panel');
+      const labels = [...document.querySelectorAll('.result-slot-label span')];
+      return {
+        hasTopBoardPanel: Boolean(boardPanel),
+        truncatedLabels: labels.filter((label) => (
+          label instanceof HTMLElement && label.scrollWidth > label.clientWidth + 1
+        )).length,
+        overflowsFirstScreen: shell instanceof HTMLElement ? shell.scrollHeight > shell.clientHeight + 24 : true
+      };
+    });
+    if (showdownLayout.hasTopBoardPanel) {
+      throw new Error('Expected showdown to use only the result public board');
+    }
+    if (showdownLayout.truncatedLabels > 0) {
+      throw new Error(`Expected no truncated showdown labels, found ${showdownLayout.truncatedLabels}`);
+    }
+    if (showdownLayout.overflowsFirstScreen) {
+      throw new Error('Expected compact showdown summary to fit in the first mobile viewport');
+    }
     await page.waitForTimeout(800);
 
     const finalState = await page.evaluate(() => window.__pokerDebug?.getState());

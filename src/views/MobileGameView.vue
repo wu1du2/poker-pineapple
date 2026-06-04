@@ -102,6 +102,10 @@ const slotDelta = (settlement: SlotSettlementResult | undefined, slotId: number)
   return settlement.slot3Delta;
 };
 
+const slotResultLabel = (seatIndex: number, slotId: number) => {
+  return props.calculatedResults[seatIndex]?.[slotId]?.split(' ')[0] || '未计算';
+};
+
 const formatDelta = (value: number) => {
   if (value > 0) return `+${value}`;
   return String(value);
@@ -157,7 +161,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </button>
     </section>
 
-    <section class="board-panel">
+    <section v-if="!isShowdown" class="board-panel">
       <div class="panel-heading">
         <span>公共牌</span>
         <span>{{ gameState.phase || 'PREFLOP' }}</span>
@@ -257,10 +261,10 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
 
       <div class="result-public-board" data-testid="result-public-board">
-        <PokerCard v-for="card in gameState.communityCards" :key="`result-${card.id}`" :card="card" width="34px" />
+        <PokerCard v-for="card in gameState.communityCards" :key="`result-${card.id}`" :card="card" width="28px" />
       </div>
 
-      <div class="result-grid">
+      <div class="result-grid compact-showdown-grid">
         <article
           v-for="{ seat, seatIndex } in resultPlayers"
           :key="seatIndex"
@@ -286,13 +290,13 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
           >
             <div class="result-slot-label">
               <strong :style="{ color: multiplierColors[slotId] }">{{ slotMultipliers[slotId] }}</strong>
-              <span>{{ calculatedResults[seatIndex]?.[slotId] || '未计算' }}</span>
+              <span>{{ slotResultLabel(seatIndex, slotId) }}</span>
               <em>{{ formatDelta(slotDelta(findSettlement(seatIndex), slotId)) }}</em>
             </div>
-            <div class="result-cards">
+            <div class="result-cards compact-result-cards">
               <template v-for="(card, cardIndex) in (seat.slots[slotId] || [])" :key="`${slotId}-${cardIndex}`">
                 <div v-if="card.id === 'hidden'" class="mobile-card-back"></div>
-                <PokerCard v-else :card="card" width="25px" />
+                <PokerCard v-else :card="card" width="20px" />
               </template>
             </div>
           </div>
@@ -313,7 +317,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </button>
     </section>
 
-    <section v-if="!isArranging" class="admin-mobile-panel">
+    <section v-if="!isArranging && !isShowdown" class="admin-mobile-panel">
       <button type="button" :disabled="!canFillAi" @click="control('fill-ai')">加满AI</button>
       <details class="debug-menu">
         <summary aria-label="更多调试操作">...</summary>
@@ -759,11 +763,12 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .results-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
+  padding: 8px;
 }
 
 .result-public-board {
-  min-height: 48px;
+  min-height: 40px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   display: flex;
@@ -775,11 +780,11 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
 }
 
 .result-player-card {
-  padding: 6px;
+  padding: 5px;
   min-width: 0;
 }
 
@@ -790,8 +795,8 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .result-player-head {
-  margin-bottom: 5px;
-  font-size: 14px;
+  margin-bottom: 4px;
+  font-size: 12px;
 }
 
 .result-player-head strong {
@@ -826,22 +831,22 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .result-slot {
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 4px;
+  padding: 3px 4px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
-  min-height: 44px;
+  gap: 3px;
+  min-height: 34px;
 }
 
 .result-slot + .result-slot {
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .result-slot-label {
   min-width: 0;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 3px;
 }
 
 .result-slot-label strong,
@@ -850,14 +855,12 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .result-slot-label strong {
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .result-slot-label span {
   color: #dbe9e4;
   font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -865,12 +868,16 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   margin-left: auto;
   font-style: normal;
   font-weight: 800;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .result-cards {
   display: flex;
   justify-content: flex-end;
-  gap: 2px;
+  gap: 1px;
+}
+
+.compact-result-cards {
+  display: none;
 }
 </style>
