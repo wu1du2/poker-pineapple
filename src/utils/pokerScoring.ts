@@ -15,6 +15,29 @@ export const HandCategory = {
 
 export type HandCategory = typeof HandCategory[keyof typeof HandCategory];
 
+export interface CardInput {
+  id?: string;
+  suit: string;
+  rank: string;
+}
+
+export const HandCategoryName: { [key: number]: string } = {
+  1: '高牌',
+  2: '一对',
+  3: '两对',
+  4: '三条',
+  5: '顺子',
+  6: '同花',
+  7: '葫芦',
+  8: '四条',
+  9: '同花顺'
+};
+
+const RANK_VALUE: { [key: string]: number } = {
+  '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
+  'J': 11, 'Q': 12, 'K': 13, 'A': 14
+};
+
 // 基础强度分映射
 const BASE_STRENGTH: Record<number, number> = {
   [HandCategory.HighCard]: 1,
@@ -55,6 +78,106 @@ export interface SlotSettlementResult {
   totalLoserDelta: number;
   totalDelta: number;
   isTotalLoser: boolean;
+}
+
+export interface GameSettlementSeat {
+  slots: Record<number, CardInput[]>;
+  isAway?: boolean;
+}
+
+export interface GameSettlementResult {
+  settlementResults: SlotSettlementResult[];
+  winningSlots: Record<number, number[]>;
+  calculatedResults: Record<number, Record<number, string>>;
+  totalDeltaSum: number;
+}
+
+export function calculateHandScore(cards: CardInput[]): number {
+  if (cards.length !== 5) return 0;
+
+  const values = cards
+    .map(c => RANK_VALUE[c.rank] || 0)
+    .sort((a, b) => b - a);
+    
+  const firstSuit = cards[0]?.suit;
+  const isFlush = firstSuit ? cards.every(c => c.suit === firstSuit) : false;
+  
+  let isStraight = true;
+  for (let i = 0; i < 4; i++) {
+    if ((values[i] ?? 0) - (values[i + 1] ?? 0) !== 1) {
+      isStraight = false;
+      break;
+    }
+  }
+  
+  if (!isStraight && values[0] === 14 && values[1] === 5 && values[2] === 4 && values[3] === 3 && values[4] === 2) {
+    isStraight = true;
+    values[0] = 5; values[1] = 4; values[2] = 3; values[3] = 2; values[4] = 1; 
+  }
+
+  const counts: { [key: number]: number } = {};
+  values.forEach(v => { 
+    counts[v] = (counts[v] || 0) + 1; 
+  });
+
+  const groups = Object.keys(counts).map(k => ({ val: parseInt(k), count: counts[parseInt(k)] }));
+  
+  groups.sort((a, b) => {
+    const countA = a?.count || 0;
+    const countB = b?.count || 0;
+    if (countB !== countA) return countB - countA;
+    return (b?.val || 0) - (a?.val || 0);
+  });
+
+  let category = 1;
+  let sortedValues = values; 
+
+  const g = (idx: number) => groups[idx] ? groups[idx].val : 0;
+  const c = (idx: number) => groups[idx] ? groups[idx].count : 0;
+
+  if (isFlush && isStraight) { category = 9; sortedValues = values; }
+  else if (c(0) === 4) { category = 8; sortedValues = [g(0), g(1), 0, 0, 0]; }
+  else if (c(0) === 3 && c(1) === 2) { category = 7; sortedValues = [g(0), g(1), 0, 0, 0]; }
+  else if (isFlush) { category = 6; sortedValues = values; }
+  else if (isStraight) { category = 5; sortedValues = values; }
+  else if (c(0) === 3) { category = 4; sortedValues = [g(0), g(1), g(2), 0, 0]; }
+  else if (c(0) === 2 && c(1) === 2) { category = 3; sortedValues = [g(0), g(1), g(2), 0, 0]; }
+  else if (c(0) === 2) { category = 2; sortedValues = [g(0), g(1), g(2), g(3), 0]; }
+  else { category = 1; sortedValues = values; }
+
+  let score = category << 20;
+  score |= (sortedValues[0] || 0) << 16;
+  score |= (sortedValues[1] || 0) << 12;
+  score |= (sortedValues[2] || 0) << 8;
+  score |= (sortedValues[3] || 0) << 4;
+  score |= (sortedValues[4] || 0);
+
+  return score;
+}
+
+export function calculateHandScore5of7(cards: CardInput[]): { score: number, category: number } {
+  if (cards.length < 5) return { score: 0, category: 0 };
+  
+  let maxScore = -1;
+  
+  const combine = (source: CardInput[], count: number): CardInput[][] => {
+      if (count === 0) return [[]];
+      if (source.length === 0) return [];
+      const [first, ...rest] = source;
+      if (!first) return [];
+      const withFirst = combine(rest, count - 1).map(c => [first, ...c]);
+      const withoutFirst = combine(rest, count);
+      return [...withFirst, ...withoutFirst];
+  };
+
+  const combinations = combine(cards, 5);
+  
+  for (const comb of combinations) {
+    const score = calculateHandScore(comb);
+    if (score > maxScore) maxScore = score;
+  }
+
+  return { score: maxScore, category: maxScore >> 20 };
 }
 
 /**
@@ -206,4 +329,91 @@ export function calculateTotalSettlement(
   }
 
   return totalResults;
+}
+
+export function calculateGameSettlement(
+  seats: (GameSettlementSeat | null)[],
+  communityCards: CardInput[]
+): GameSettlementResult {
+  const winningSlots: Record<number, number[]> = {};
+  const calculatedResults: Record<number, Record<number, string>> = {};
+  const settlementResults: SlotSettlementResult[] = [];
+  const slotScores: Record<number, { seatIndex: number, score: number, category: number, isRoyal: boolean }[]> = {
+    1: [], 2: [], 3: []
+  };
+  const playerSlotInfos: Record<number, Record<number, PlayerSlotInfo>> = {};
+
+  if (communityCards.length < 3) {
+    return { settlementResults, winningSlots, calculatedResults, totalDeltaSum: 0 };
+  }
+
+  seats.forEach((seat, seatIndex) => {
+    if (!seat || seat.isAway) return;
+    const seatCalculatedResults: Record<number, string> = {};
+    const seatSlotInfos: Record<number, PlayerSlotInfo> = {};
+    calculatedResults[seatIndex] = seatCalculatedResults;
+    playerSlotInfos[seatIndex] = seatSlotInfos;
+
+    for (let slotId = 1; slotId <= 3; slotId++) {
+      const slotCards = seat.slots[slotId] || [];
+      const visibleCards = slotCards.filter((card) => card.id !== 'hidden');
+      
+      if (visibleCards.length === 2) {
+        const pool = [...communityCards, ...visibleCards];
+        const result = calculateHandScore5of7(pool);
+        const categoryName = HandCategoryName[result.category] || '高牌';
+        const isRoyal = result.category === HandCategory.StraightFlush && ((result.score >> 16) & 0xF) === 14;
+
+        seatCalculatedResults[slotId] = `${categoryName} (${result.score.toString(16).toUpperCase()})`;
+        slotScores[slotId]?.push({ seatIndex, score: result.score, category: result.category, isRoyal });
+        seatSlotInfos[slotId] = {
+          seatIndex,
+          hasPlayed: true,
+          category: result.category,
+          isRoyal
+        };
+      } else {
+        seatCalculatedResults[slotId] = '';
+        seatSlotInfos[slotId] = {
+          seatIndex,
+          hasPlayed: false,
+          category: 0
+        };
+      }
+    }
+  });
+
+  const slotResults: SettlementResult[][] = [];
+  for (let slotId = 1; slotId <= 3; slotId++) {
+    const scores = slotScores[slotId] || [];
+    const maxScore = scores.length > 0 ? Math.max(...scores.map(score => score.score)) : 0;
+    const winnerSeatIndices = scores.filter(score => score.score === maxScore).map(score => score.seatIndex);
+    if (winnerSeatIndices.length > 0) {
+      winnerSeatIndices.forEach((seatIndex) => {
+        if (!winningSlots[seatIndex]) winningSlots[seatIndex] = [];
+        winningSlots[seatIndex].push(slotId);
+      });
+    }
+
+    const players: PlayerSlotInfo[] = [];
+    seats.forEach((seat, seatIndex) => {
+      if (!seat || seat.isAway) return;
+      const slotInfo = playerSlotInfos[seatIndex]?.[slotId];
+      if (slotInfo) players.push(slotInfo);
+    });
+    slotResults.push(calculateSlotSettlement(players, winnerSeatIndices, slotId));
+  }
+
+  const allPlayerSeatIndices = seats
+    .map((seat, seatIndex) => ({ seat, seatIndex }))
+    .filter(({ seat }) => seat !== null && !seat.isAway)
+    .map(({ seatIndex }) => seatIndex);
+  settlementResults.push(...calculateTotalSettlement(slotResults, allPlayerSeatIndices));
+
+  return {
+    settlementResults,
+    winningSlots,
+    calculatedResults,
+    totalDeltaSum: settlementResults.reduce((sum, result) => sum + result.totalDelta, 0)
+  };
 }

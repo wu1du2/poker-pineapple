@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
 import { createPlayerState, type Card, type Player } from './playerTypes';
+import { clearSettlementState, settleRoundScores } from './settlement';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +44,10 @@ let dealTurnCount = 0; // 新增：发牌计数
 const gameState = {
   seats: new Array(SEAT_COUNT).fill(null) as (Player | null)[],
   communityCards: [] as Card[],
+  settlementResults: [],
+  winningSlots: {} as Record<number, number[]>,
+  calculatedResults: {} as Record<number, Record<number, string>>,
+  isSettled: false,
   // dealerIndex: -1, // 移除庄家索引
   billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
   phase: 'PREFLOP'
@@ -81,6 +86,7 @@ function startNewRound() {
   dealTurnCount = 0;
   deck.reset();
   gameState.communityCards = [];
+  clearSettlementState(gameState);
   gameState.phase = 'PLAYING';
 
   gameState.seats.forEach(p => {
@@ -117,6 +123,7 @@ function completeShowdown() {
     gameState.communityCards.push(deck.deal());
   }
   dealTurnCount = Math.max(0, gameState.communityCards.length - 3);
+  settleRoundScores(gameState);
 
   io.emit('update', getPublicState());
   io.emit('all-players-ready');
@@ -132,6 +139,8 @@ app.post('/debug/mock6-showdown', (_req, res) => {
   gameState.communityCards = mockState.communityCards;
   gameState.billboard = mockState.billboard;
   gameState.phase = mockState.phase;
+  clearSettlementState(gameState);
+  settleRoundScores(gameState);
   io.emit('reset-table');
   io.emit('update', getPublicState());
   res.json(getPublicState());
@@ -307,6 +316,9 @@ io.on('connection', (socket: Socket) => {
 
       dealTurnCount++; // 发牌计数加1
       gameState.communityCards.push(deck.deal());
+      if (gameState.communityCards.length >= 5) {
+        settleRoundScores(gameState);
+      }
       io.emit('update', getPublicState());
       
       if (dealTurnCount === 2) { // 计数达到2
@@ -317,6 +329,12 @@ io.on('connection', (socket: Socket) => {
     }
     else if (action === 'deal-river') {
       gameState.communityCards.push(deck.deal());
+      if (gameState.phase === 'SHOWDOWN' && gameState.communityCards.length >= 5) {
+        settleRoundScores(gameState);
+      }
+      io.emit('update', getPublicState());
+    } else if (action === 'settle-scores') {
+      settleRoundScores(gameState);
       io.emit('update', getPublicState());
     }
   });
@@ -327,6 +345,7 @@ io.on('connection', (socket: Socket) => {
       // gameState.dealerIndex = -1; // 移除庄家重置
       gameState.seats = new Array(SEAT_COUNT).fill(null);
       gameState.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
+      clearSettlementState(gameState);
       io.emit('update', getPublicState());
       io.emit('force-reload');
     });

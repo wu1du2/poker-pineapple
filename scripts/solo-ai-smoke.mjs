@@ -152,6 +152,13 @@ async function main() {
         debugState?.settlementResults?.length === 6 &&
         document.querySelectorAll('.result-player-card').length === 6;
     });
+    await page.waitForFunction(() => {
+      const gameState = window.__pokerDebug?.getState()?.gameState;
+      const seats = gameState?.seats?.filter(Boolean) || [];
+      return gameState?.isSettled === true &&
+        seats.length === 6 &&
+        seats.some((seat) => seat.score !== 0);
+    });
     const nextRoundReadyButton = page.getByRole('button', { name: '准备下一局 ready' });
     await nextRoundReadyButton.waitFor();
     if (!(await nextRoundReadyButton.isEnabled())) {

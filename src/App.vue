@@ -3,8 +3,8 @@ import { reactive, ref, onMounted, computed, watch } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
 import MobileGameView from './views/MobileGameView.vue';
-import { calculateSlotSettlement, calculateTotalSettlement } from './utils/pokerScoring';
-import type { PlayerSlotInfo, SettlementResult, SlotSettlementResult } from './utils/pokerScoring';
+import { calculateGameSettlement } from './utils/pokerScoring';
+import type { SlotSettlementResult } from './utils/pokerScoring';
 
 const socket = io(); 
 
@@ -14,118 +14,6 @@ const useMobileUi = ref(initialUiMode !== 'desktop');
 const setMobileUi = (enabled: boolean) => {
   useMobileUi.value = enabled;
 };
-
-// --- 移植的核心算法 (最终修复版) ---
-interface CardInput {
-  suit: string;
-  rank: string;
-}
-
-const HandCategoryName: { [key: number]: string } = {
-  1: '高牌',
-  2: '一对',
-  3: '两对',
-  4: '三条',
-  5: '顺子',
-  6: '同花',
-  7: '葫芦',
-  8: '四条',
-  9: '同花顺'
-};
-
-const RANK_VALUE: { [key: string]: number } = {
-  '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
-  'J': 11, 'Q': 12, 'K': 13, 'A': 14
-};
-
-function calculateHandScore(cards: CardInput[]): number {
-  if (cards.length !== 5) return 0;
-
-  const values = cards
-    .map(c => RANK_VALUE[c.rank] || 0)
-    .sort((a, b) => b - a);
-    
-  const firstSuit = cards[0]?.suit;
-  const isFlush = firstSuit ? cards.every(c => c.suit === firstSuit) : false;
-  
-  let isStraight = true;
-  for (let i = 0; i < 4; i++) {
-    if ((values[i] ?? 0) - (values[i + 1] ?? 0) !== 1) {
-      isStraight = false;
-      break;
-    }
-  }
-  
-  if (!isStraight && values[0] === 14 && values[1] === 5 && values[2] === 4 && values[3] === 3 && values[4] === 2) {
-    isStraight = true;
-    values[0] = 5; values[1] = 4; values[2] = 3; values[3] = 2; values[4] = 1; 
-  }
-
-  const counts: { [key: number]: number } = {};
-  values.forEach(v => { 
-    counts[v] = (counts[v] || 0) + 1; 
-  });
-
-  const groups = Object.keys(counts).map(k => ({ val: parseInt(k), count: counts[parseInt(k)] }));
-  
-  groups.sort((a, b) => {
-    const countA = a?.count || 0;
-    const countB = b?.count || 0;
-    if (countB !== countA) return countB - countA;
-    return (b?.val || 0) - (a?.val || 0);
-  });
-
-  let category = 1;
-  let sortedValues = values; 
-
-  const g = (idx: number) => groups[idx] ? groups[idx].val : 0;
-  const c = (idx: number) => groups[idx] ? groups[idx].count : 0;
-
-  if (isFlush && isStraight) { category = 9; sortedValues = values; }
-  else if (c(0) === 4) { category = 8; sortedValues = [g(0), g(1), 0, 0, 0]; }
-  else if (c(0) === 3 && c(1) === 2) { category = 7; sortedValues = [g(0), g(1), 0, 0, 0]; }
-  else if (isFlush) { category = 6; sortedValues = values; }
-  else if (isStraight) { category = 5; sortedValues = values; }
-  else if (c(0) === 3) { category = 4; sortedValues = [g(0), g(1), g(2), 0, 0]; }
-  else if (c(0) === 2 && c(1) === 2) { category = 3; sortedValues = [g(0), g(1), g(2), 0, 0]; }
-  else if (c(0) === 2) { category = 2; sortedValues = [g(0), g(1), g(2), g(3), 0]; }
-  else { category = 1; sortedValues = values; }
-
-  let score = category << 20;
-  score |= (sortedValues[0] || 0) << 16;
-  score |= (sortedValues[1] || 0) << 12;
-  score |= (sortedValues[2] || 0) << 8;
-  score |= (sortedValues[3] || 0) << 4;
-  score |= (sortedValues[4] || 0);
-
-  return score;
-}
-
-function calculateHandScore5of7(cards: CardInput[]): { score: number, category: number } {
-  if (cards.length < 5) return { score: 0, category: 0 };
-  
-  let maxScore = -1;
-  
-  const combine = (source: any[], count: number): any[][] => {
-      if (count === 0) return [[]];
-      if (source.length === 0) return [];
-      const [first, ...rest] = source;
-      const withFirst = combine(rest, count - 1).map(c => [first, ...c]);
-      const withoutFirst = combine(rest, count);
-      return [...withFirst, ...withoutFirst];
-  };
-
-  const combinations = combine(cards, 5);
-  
-  for (const comb of combinations) {
-    const s = calculateHandScore(comb);
-    if (s > maxScore) maxScore = s;
-  }
-
-  return { score: maxScore, category: maxScore >> 20 };
-}
-// --- 移植的核心算法 (结束) ---
-
 
 const myName = ref('Player' + Math.floor(Math.random()*100));
 const mySeatIndex = ref(-1);
@@ -168,6 +56,7 @@ interface Player {
   isReady: boolean;
   isDone: boolean;
   isAway: boolean; // 新增：暂离状态
+  isBot?: boolean;
 }
 
 interface GameState {
@@ -175,6 +64,10 @@ interface GameState {
   communityCards: Card[];
   billboard: string;
   phase?: string;
+  settlementResults?: SlotSettlementResult[];
+  winningSlots?: { [key: number]: number[] };
+  calculatedResults?: { [key: number]: { [slotId: number]: string } };
+  isSettled?: boolean;
 }
 
 const gameState = reactive<GameState>({
@@ -186,6 +79,15 @@ const gameState = reactive<GameState>({
 const totalScore = computed(() => {
   return gameState.seats.reduce((sum, seat) => sum + (seat ? seat.score : 0), 0);
 });
+
+const syncSettlementFromState = (state: GameState) => {
+  settlementResults.length = 0;
+  settlementResults.push(...(state.settlementResults || []));
+  winningSlots.value = state.winningSlots || {};
+  calculatedResults.value = state.calculatedResults || {};
+  totalDeltaSum.value = settlementResults.reduce((sum, result) => sum + result.totalDelta, 0);
+  isScoreSettled.value = Boolean(state.isSettled);
+};
 
 const generateToken = () => {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -216,7 +118,10 @@ onMounted(() => {
     allPlayersReady.value = true;
   });
 
-  socket.on('init', (state) => Object.assign(gameState, state));
+  socket.on('init', (state) => {
+    Object.assign(gameState, state);
+    syncSettlementFromState(gameState);
+  });
   
   socket.on('reset-table', () => {
     // 收到重置事件，清空所有计算结果
@@ -235,6 +140,7 @@ onMounted(() => {
 
   socket.on('update', (state) => {
     Object.assign(gameState, state);
+    syncSettlementFromState(gameState);
     
     if (mySeatIndex.value !== -1) {
       socket.emit('get-my-hand', mySeatIndex.value, (data: any) => {
@@ -371,141 +277,23 @@ const calculateAllScores = () => {
     return;
   }
 
-  // 清空之前的获胜状态
-  winningSlots.value = {};
-  // 清空之前的结算结果
+  if (gameState.phase === 'SHOWDOWN' && !gameState.isSettled) {
+    socket.emit('control', 'settle-scores');
+  }
+
+  const seatsForLocalDisplay = gameState.seats.map((seat, idx) => {
+    if (!seat) return null;
+    return {
+      ...seat,
+      slots: idx === mySeatIndex.value ? mySlots.value : seat.slots
+    };
+  });
+  const localResult = calculateGameSettlement(seatsForLocalDisplay, community);
   settlementResults.length = 0;
-  totalDeltaSum.value = 0;
-
-  // 临时存储所有人的分数： { [slotId]: [ { seatIndex, score, category, isRoyal } ] }
-  const slotScores: { [key: number]: { seatIndex: number, score: number, category: number, isRoyal: boolean }[] } = {
-    1: [], 2: [], 3: []
-  };
-
-  // 临时存储所有人的Slot信息： { [seatIndex]: { [slotId]: PlayerSlotInfo } }
-  const playerSlotInfos: { [key: number]: { [slotId: number]: PlayerSlotInfo } } = {};
-  gameState.seats.forEach((_, idx) => {
-    playerSlotInfos[idx] = {};
-  });
-
-  // 1. 计算每个人的分数
-  gameState.seats.forEach((seat, idx) => {
-    if (!seat || seat.isAway) return; // 跳过暂离玩家
-    
-    const targetSlots = (idx === mySeatIndex.value) ? mySlots.value : seat.slots;
-    
-    if (!calculatedResults.value[idx]) calculatedResults.value[idx] = {};
-    if (!playerSlotInfos[idx]) playerSlotInfos[idx] = {};
-
-    for (let i = 1; i <= 3; i++) {
-      const slotCards = targetSlots[i] || [];
-      const visibleCards = slotCards.filter((c: any) => c.id !== 'hidden');
-      
-      if (visibleCards.length === 2) {
-        const pool = [...community, ...visibleCards];
-        const res = calculateHandScore5of7(pool);
-        const catName = HandCategoryName[res.category] || '高牌';
-        
-        // 计算是否为皇家同花顺
-        const isRoyal = res.category === 9 && ((res.score >> 16) & 0xF) === 14;
-
-        // 显示结果
-        calculatedResults.value[idx][i] = `${catName} (${res.score.toString(16).toUpperCase()})`;
-        
-        // 收集分数用于比较
-        const slotScore = slotScores[i];
-        if (slotScore) {
-          slotScore.push({ seatIndex: idx, score: res.score, category: res.category, isRoyal });
-        }
-        
-        // 存储Slot信息
-        playerSlotInfos[idx][i] = {
-          seatIndex: idx,
-          hasPlayed: true,
-          category: res.category,
-          isRoyal
-        };
-      } else {
-        calculatedResults.value[idx][i] = '';
-        playerSlotInfos[idx][i] = {
-          seatIndex: idx,
-          hasPlayed: false,
-          category: 0
-        };
-      }
-    }
-  });
-
-  // 2. 比较分数，找出每个 Slot 的胜者
-  const slotWinners: { [key: number]: number[] } = {};
-  for (let i = 1; i <= 3; i++) {
-    const scores = slotScores[i];
-    if (!scores || scores.length === 0) continue;
-
-    // 找出最大分
-    const maxScore = Math.max(...scores.map(s => s.score));
-    
-    // 找出所有等于最大分的人
-    const winners = scores.filter(s => s.score === maxScore);
-    const winnerSeatIndices = winners.map(w => w.seatIndex);
-    slotWinners[i] = winnerSeatIndices;
-
-    // 标记胜者
-    winners.forEach(w => {
-      const seatIndex = w.seatIndex;
-      let winningSlot = winningSlots.value[seatIndex];
-          if (!winningSlot) {
-            winningSlot = [];
-            winningSlots.value[seatIndex] = winningSlot;
-          }
-          winningSlot.push(i);
-    });
-  }
-
-  // 3. 计算每个Slot的结算结果
-  const slotResults: SettlementResult[][] = [];
-  for (let i = 1; i <= 3; i++) {
-    const players: PlayerSlotInfo[] = [];
-    gameState.seats.forEach((seat, idx) => {
-      if (!seat) return;
-      const playerSlots = playerSlotInfos[idx];
-      if (playerSlots) {
-        const slotInfo = playerSlots[i];
-        if (slotInfo) {
-          players.push(slotInfo);
-        }
-      }
-    });
-    const winnerSeatIndices = slotWinners[i] || [];
-    const slotResult = calculateSlotSettlement(players, winnerSeatIndices, i);
-    slotResults.push(slotResult);
-  }
-
-  // 4. 计算总结算结果
-  const allPlayerSeatIndices = gameState.seats
-    .map((seat, idx) => ({ seat, idx }))
-    .filter(({ seat }) => seat !== null && !seat.isAway)
-    .map(({ idx }) => idx);
-  
-  const totalResults = calculateTotalSettlement(slotResults, allPlayerSeatIndices);
-  settlementResults.push(...totalResults);
-
-  // 5. 计算总delta求和
-  totalDeltaSum.value = totalResults.reduce((sum, result) => sum + result.totalDelta, 0);
-
-  // 自动累加分数（仅更新自己的，防止重复）
-  if (!isScoreSettled.value) {
-    const myResult = settlementResults.find(r => r.seatIndex === mySeatIndex.value);
-    if (myResult) {
-      const currentSeat = gameState.seats[mySeatIndex.value];
-      if (currentSeat) {
-        const newScore = currentSeat.score + myResult.totalDelta;
-        socket.emit('update-score', { seatIndex: mySeatIndex.value, score: newScore });
-      }
-    }
-    // 标记为已结算，防止重复累加
-    isScoreSettled.value = true;
-  }
+  settlementResults.push(...localResult.settlementResults);
+  winningSlots.value = localResult.winningSlots;
+  calculatedResults.value = localResult.calculatedResults;
+  totalDeltaSum.value = localResult.totalDeltaSum;
 };
 
 const handleHardReset = () => {
