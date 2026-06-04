@@ -4,9 +4,16 @@ import { Server, Socket } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
-import { arrangeAiHandInOrder, fillEmptySeatsWithAi, revealAiPlayers } from './aiPlayers';
+import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
 import { createPlayerState, type Card, type Player } from './playerTypes';
 import { clearSettlementState, settleRoundScores } from './settlement';
+import {
+  areRoundParticipantsDone,
+  canStartRound,
+  getReadyActiveSeatIndices,
+  isActiveSeat,
+  isRoundParticipant
+} from './roundRules';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,33 +55,20 @@ const gameState = {
   winningSlots: {} as Record<number, number[]>,
   calculatedResults: {} as Record<number, Record<number, string>>,
   isSettled: false,
+  roundId: 0,
+  roundSeatIndices: [] as number[],
   // dealerIndex: -1, // 移除庄家索引
   billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
-  phase: 'PREFLOP'
+  phase: 'LOBBY'
 };
-
-function isActiveSeat(seat: Player | null) {
-  return Boolean(seat && !seat.isAway);
-}
-
-function hasActivePlayers() {
-  return gameState.seats.some(isActiveSeat);
-}
-
-function areAllActiveReady() {
-  return hasActivePlayers() && gameState.seats.every(seat => seat === null || seat.isAway || seat.isReady);
-}
-
-function areAllActiveDone() {
-  return hasActivePlayers() && gameState.seats.every(seat => seat === null || seat.isAway || seat.isDone);
-}
 
 function isSeatFullyArranged(seat: Player) {
   return [1, 2, 3].every(slotId => (seat.slots?.[slotId]?.length || 0) === 2);
 }
 
-function revealActivePlayers() {
-  gameState.seats.forEach((seat) => {
+function revealRoundParticipants() {
+  gameState.roundSeatIndices.forEach((seatIndex) => {
+    const seat = gameState.seats[seatIndex];
     if (isActiveSeat(seat)) {
       seat.isShowing = true;
       seat.shownSlots = [1, 2, 3];
@@ -83,13 +77,17 @@ function revealActivePlayers() {
 }
 
 function startNewRound() {
+  if (!canStartRound(gameState.seats)) return;
+
   dealTurnCount = 0;
   deck.reset();
   gameState.communityCards = [];
   clearSettlementState(gameState);
+  gameState.roundId += 1;
+  gameState.roundSeatIndices = getReadyActiveSeatIndices(gameState.seats);
   gameState.phase = 'PLAYING';
 
-  gameState.seats.forEach(p => {
+  gameState.seats.forEach((p, seatIndex) => {
     if (!p) return;
 
     p.hand = [];
@@ -99,7 +97,7 @@ function startNewRound() {
     p.isShowing = false;
     p.isDone = false;
 
-    if (p.isAway) {
+    if (p.isAway || !isRoundParticipant(gameState.roundSeatIndices, seatIndex)) {
       p.isReady = false;
       return;
     }
@@ -116,8 +114,7 @@ function startNewRound() {
 
 function completeShowdown() {
   gameState.phase = 'SHOWDOWN';
-  revealAiPlayers(gameState.seats);
-  revealActivePlayers();
+  revealRoundParticipants();
 
   while (gameState.communityCards.length < 5) {
     gameState.communityCards.push(deck.deal());
@@ -139,6 +136,7 @@ app.post('/debug/mock6-showdown', (_req, res) => {
   gameState.communityCards = mockState.communityCards;
   gameState.billboard = mockState.billboard;
   gameState.phase = mockState.phase;
+  gameState.roundSeatIndices = mockState.seats.map((_, seatIndex) => seatIndex);
   clearSettlementState(gameState);
   settleRoundScores(gameState);
   io.emit('reset-table');
@@ -309,7 +307,7 @@ io.on('connection', (socket: Socket) => {
       }
       
       // 校验是否所有人都已完成摆牌 (双重保险)
-      if (!areAllActiveDone()) {
+      if (!areRoundParticipantsDone(gameState.seats, gameState.roundSeatIndices)) {
         console.log("Not all players done, skipping deal-turn");
         return;
       }
@@ -346,6 +344,9 @@ io.on('connection', (socket: Socket) => {
       gameState.seats = new Array(SEAT_COUNT).fill(null);
       gameState.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
       clearSettlementState(gameState);
+      gameState.roundId = 0;
+      gameState.roundSeatIndices = [];
+      gameState.phase = 'LOBBY';
       io.emit('update', getPublicState());
       io.emit('force-reload');
     });
@@ -365,11 +366,12 @@ io.on('connection', (socket: Socket) => {
     const p = gameState.seats[seatIndex];
     if (p && p.id === socket.id && !p.isAway) {
       if (gameState.phase === 'PLAYING') {
+        if (!isRoundParticipant(gameState.roundSeatIndices, seatIndex)) return;
         if (ready && !isSeatFullyArranged(p)) return;
 
         p.isDone = ready;
 
-        if (areAllActiveDone()) {
+        if (areRoundParticipantsDone(gameState.seats, gameState.roundSeatIndices)) {
           completeShowdown();
         } else {
           io.emit('update', getPublicState());
@@ -381,7 +383,7 @@ io.on('connection', (socket: Socket) => {
       p.isDone = false;
       io.emit('update', getPublicState());
 
-      if (areAllActiveReady()) {
+      if (canStartRound(gameState.seats)) {
         startNewRound();
       }
     }

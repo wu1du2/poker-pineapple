@@ -4,6 +4,7 @@ import type { Card, Player } from './playerTypes';
 export interface SettlementState {
   seats: (Player | null)[];
   communityCards: Card[];
+  roundSeatIndices?: number[];
   settlementResults: SlotSettlementResult[];
   winningSlots: Record<number, number[]>;
   calculatedResults: Record<number, Record<number, string>>;
@@ -21,7 +22,10 @@ export function settleRoundScores(state: SettlementState): boolean {
   if (state.isSettled) return false;
   if (state.communityCards.length < 3) return false;
 
-  const result = calculateGameSettlement(state.seats, state.communityCards);
+  const settlementSeats = state.roundSeatIndices && state.roundSeatIndices.length > 0
+    ? state.seats.map((seat, seatIndex) => state.roundSeatIndices?.includes(seatIndex) ? seat : null)
+    : state.seats;
+  const result = calculateGameSettlement(settlementSeats, state.communityCards);
   state.settlementResults = result.settlementResults;
   state.winningSlots = result.winningSlots;
   state.calculatedResults = result.calculatedResults;

@@ -25,9 +25,16 @@ describe('server-authoritative settlement', () => {
       2: [card('7♠', '♠', '7'), card('8♦', '♦', '8')],
       3: [card('9♥', '♥', '9'), card('9♦', '♦', '9')]
     };
+    const spectator = createPlayerState({ id: 'socket-2', token: 'token-2', name: 'Spectator' });
+    spectator.score = 999;
+    spectator.slots = {
+      1: [card('A♥', '♥', 'A'), card('10♥', '♥', '10')],
+      2: [card('Q♥', '♥', 'Q'), card('J♥', '♥', 'J')],
+      3: [card('8♥', '♥', '8'), card('7♥', '♥', '7')]
+    };
 
-    const state: SettlementState = {
-      seats: [human, bot, null, null, null, null],
+    const state: SettlementState & { roundSeatIndices: number[] } = {
+      seats: [human, bot, spectator, null, null, null],
       communityCards: [
         card('2♣', '♣', '2'),
         card('3♦', '♦', '3'),
@@ -38,7 +45,8 @@ describe('server-authoritative settlement', () => {
       settlementResults: [],
       winningSlots: {},
       calculatedResults: {},
-      isSettled: false
+      isSettled: false,
+      roundSeatIndices: [0, 1]
     };
 
     const first = settleRoundScores(state);
@@ -48,8 +56,10 @@ describe('server-authoritative settlement', () => {
     expect(second).toBe(false);
     expect(state.seats[0]?.score).toBe(90);
     expect(state.seats[1]?.score).toBe(-60);
+    expect(state.seats[2]?.score).toBe(999);
     expect(state.settlementResults.find((result) => result.seatIndex === 0)?.totalDelta).toBe(80);
     expect(state.settlementResults.find((result) => result.seatIndex === 1)?.totalDelta).toBe(-80);
+    expect(state.settlementResults.find((result) => result.seatIndex === 2)).toBeUndefined();
     expect(state.winningSlots[0]).toEqual([1, 2, 3]);
   });
 });
