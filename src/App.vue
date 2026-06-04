@@ -122,6 +122,15 @@ const syncSettlementFromState = (state: GameState) => {
   isScoreSettled.value = Boolean(state.isSettled);
 };
 
+const syncMyPrivateCards = (afterSync?: () => void) => {
+  if (mySeatIndex.value === -1) return;
+  socket.emit('get-my-hand', mySeatIndex.value, (data: any) => {
+    myHand.value = data.hand;
+    mySlots.value = data.slots;
+    afterSync?.();
+  });
+};
+
 const generateToken = () => {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
@@ -166,10 +175,7 @@ onMounted(() => {
       localStorage.setItem('poker_room_id', restoredRoomId);
     }
     mySeatIndex.value = seatIndex;
-    socket.emit('get-my-hand', seatIndex, (data: any) => {
-      myHand.value = data.hand;
-      mySlots.value = data.slots;
-    });
+    syncMyPrivateCards();
   });
 
   socket.on('all-players-ready', () => {
@@ -201,11 +207,7 @@ onMounted(() => {
     syncSettlementFromState(gameState);
     
     if (mySeatIndex.value !== -1) {
-      socket.emit('get-my-hand', mySeatIndex.value, (data: any) => {
-        myHand.value = data.hand;
-        mySlots.value = data.slots;
-        recordMoveUpdateCommit();
-      });
+      syncMyPrivateCards(recordMoveUpdateCommit);
       // 新增：同步更新前端ready状态
       const mySeat = gameState.seats[mySeatIndex.value];
       if (mySeat) {
@@ -336,7 +338,7 @@ const recordMoveUpdateCommit = () => {
   });
 };
 
-const emitMoveCard = (cardId: string, target: string | number) => {
+const emitMoveCard = (cardId: string, target: string | number, onRejected?: () => void) => {
   if (mySeatIndex.value === -1) return;
 
   const moveId = ++moveSequence;
@@ -361,9 +363,28 @@ const emitMoveCard = (cardId: string, target: string | number) => {
         moveLatencyStats.pendingMoveId = pendingMoves.size > 0
           ? Math.max(...Array.from(pendingMoves.keys()))
           : null;
+        onRejected?.();
       }
     }
   );
+};
+
+const moveCardFromHandLocally = (card: Card, targetSlot: number) => {
+  myHand.value = myHand.value.filter((handCard) => handCard.id !== card.id);
+  mySlots.value = {
+    ...mySlots.value,
+    [targetSlot]: [...(mySlots.value[targetSlot] || []), card]
+  };
+};
+
+const moveCardToHandLocally = (card: Card) => {
+  const nextSlots = { ...mySlots.value };
+  for (let slotId = 1; slotId <= 3; slotId++) {
+    nextSlots[slotId] = (nextSlots[slotId] || []).filter((slotCard) => slotCard.id !== card.id);
+  }
+
+  mySlots.value = nextSlots;
+  myHand.value = [...myHand.value, card];
 };
 
 const toggleReady = () => {
@@ -462,7 +483,8 @@ const clickHandCard = (card: Card) => {
     }
   }
   if (targetSlot !== 0) {
-    emitMoveCard(card.id, targetSlot);
+    moveCardFromHandLocally(card, targetSlot);
+    emitMoveCard(card.id, targetSlot, syncMyPrivateCards);
   } else {
     alert("牌槽已满！请先移除一些牌。");
   }
@@ -470,7 +492,8 @@ const clickHandCard = (card: Card) => {
 
 const clickSlotCard = (card: Card) => {
   if (mySeatIndex.value === -1) return;
-  emitMoveCard(card.id, 'hand');
+  moveCardToHandLocally(card);
+  emitMoveCard(card.id, 'hand', syncMyPrivateCards);
 };
 
 const getSeatStyle = (index: number) => {

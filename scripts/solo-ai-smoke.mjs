@@ -62,10 +62,14 @@ async function main() {
     await context.addInitScript((token) => {
       localStorage.setItem('poker_ui_mode', 'mobile');
       localStorage.setItem('poker_user_token', token);
+      Object.defineProperty(window, 'WebSocket', {
+        configurable: true,
+        value: undefined
+      });
     }, userToken);
 
     const page = await context.newPage();
-    await page.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'networkidle' });
+    await page.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="room-gate"]');
     await page.getByTestId('create-room-button').click();
     await page.waitForSelector('[data-testid="mobile-game-view"]');
@@ -84,7 +88,7 @@ async function main() {
       localStorage.setItem('poker_user_token', token);
     }, `friend-${Date.now()}`);
     const friendPage = await friendContext.newPage();
-    await friendPage.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'networkidle' });
+    await friendPage.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'domcontentloaded' });
     await friendPage.waitForSelector('[data-testid="room-gate"]');
     await friendPage.getByTestId('room-id-input').fill(roomId);
     await friendPage.getByTestId('join-room-button').click();
@@ -97,7 +101,7 @@ async function main() {
     await page.getByRole('button', { name: '一键入座' }).click();
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 1);
     const createdRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="mobile-game-view"]');
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.mySeatIndex === 0);
     const restoredRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
@@ -167,7 +171,37 @@ async function main() {
       throw new Error('Expected mobile UI to remove reveal button and expose reset/tutorial in top menu');
     }
 
-    for (let index = 0; index < 6; index++) {
+    let delayedMoveRequests = 0;
+    await page.route('**/socket.io/**', async (route) => {
+      const request = route.request();
+      const postData = request.postData() || '';
+      if (request.method() === 'POST' && postData.includes('"move-card"')) {
+        delayedMoveRequests += 1;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      await route.continue();
+    });
+
+    const handCountBeforeOptimisticMove = await page.locator('.hand-rail .hand-card-btn').count();
+    const slotCountBeforeOptimisticMove = await page.locator('.slot-card-cells .card-placeholder').count();
+    await page.locator('.hand-rail .hand-card-btn').first().click();
+    await page.waitForTimeout(100);
+    const handCountAfterOptimisticMove = await page.locator('.hand-rail .hand-card-btn').count();
+    const slotCountAfterOptimisticMove = await page.locator('.slot-card-cells .card-placeholder').count();
+    if (
+      handCountAfterOptimisticMove !== handCountBeforeOptimisticMove - 1 ||
+      slotCountAfterOptimisticMove !== slotCountBeforeOptimisticMove + 1
+    ) {
+      throw new Error('Expected card movement to update the local UI before the delayed server round trip completes');
+    }
+
+    await page.waitForFunction(() => window.__pokerDebug?.getState()?.moveLatencyStats?.count >= 1);
+    if (delayedMoveRequests < 1) {
+      throw new Error('Expected the optimistic move test to delay at least one move-card request');
+    }
+    await page.unroute('**/socket.io/**');
+
+    for (let index = 1; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();
     }
     await page.waitForFunction(() => {
