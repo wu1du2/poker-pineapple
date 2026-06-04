@@ -60,6 +60,22 @@ class Deck {
 
 const deck = new Deck();
 const roomStore = createRoomStore();
+const revealTimers = new Map<string, NodeJS.Timeout[]>();
+
+function clearRevealTimers(room: RoomState) {
+  const timers = revealTimers.get(room.roomId) || [];
+  timers.forEach((timer) => clearTimeout(timer));
+  revealTimers.delete(room.roomId);
+}
+
+function scheduleReveal(room: RoomState, delayMs: number, callback: () => void) {
+  const timer = setTimeout(() => {
+    const timers = revealTimers.get(room.roomId) || [];
+    revealTimers.set(room.roomId, timers.filter((item) => item !== timer));
+    callback();
+  }, delayMs);
+  revealTimers.set(room.roomId, [...(revealTimers.get(room.roomId) || []), timer]);
+}
 
 function joinSocketRoom(socket: Socket, room: RoomState) {
   const previousRoomId = socket.data.roomId;
@@ -94,6 +110,7 @@ function revealRoundParticipants(room: RoomState) {
 function startNewRound(room: RoomState) {
   if (!canStartRound(room.seats)) return;
 
+  clearRevealTimers(room);
   room.dealTurnCount = 0;
   deck.reset();
   room.communityCards = [];
@@ -128,20 +145,41 @@ function startNewRound(room: RoomState) {
 }
 
 function completeShowdown(room: RoomState) {
-  room.phase = 'SHOWDOWN';
+  clearRevealTimers(room);
+  const revealRoundId = room.roundId;
+  room.phase = 'SHOWDOWN_REVEAL';
   revealRoundParticipants(room);
 
-  while (room.communityCards.length < 5) {
-    room.communityCards.push(deck.deal());
-  }
-  room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
-  settleRoundScores(room);
-
   emitRoomUpdate(room);
-  io.to(room.roomId).emit('all-players-ready');
-  setTimeout(() => {
+
+  scheduleReveal(room, 2000, () => {
+    if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_REVEAL') return;
+    if (room.communityCards.length < 4) {
+      room.communityCards.push(deck.deal());
+    }
+    room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
+    room.phase = 'SHOWDOWN_TURN';
+    emitRoomUpdate(room);
+  });
+
+  scheduleReveal(room, 4000, () => {
+    if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_TURN') return;
+    if (room.communityCards.length < 5) {
+      room.communityCards.push(deck.deal());
+    }
+    room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
+    room.phase = 'SHOWDOWN_RIVER';
+    emitRoomUpdate(room);
+  });
+
+  scheduleReveal(room, 5000, () => {
+    if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_RIVER') return;
+    settleRoundScores(room);
+    room.phase = 'SHOWDOWN_SETTLED';
+    emitRoomUpdate(room);
+    io.to(room.roomId).emit('all-players-ready');
     io.to(room.roomId).emit('auto-calculate');
-  }, 1000);
+  });
 }
 
 app.post('/debug/mock6-showdown', (_req, res) => {
@@ -426,6 +464,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('hard-reset', () => {
       const room = getSocketRoom(socket);
+      clearRevealTimers(room);
       deck.reset();
       room.communityCards = [];
       // gameState.dealerIndex = -1; // 移除庄家重置
@@ -468,6 +507,8 @@ io.on('connection', (socket: Socket) => {
         }
         return;
       }
+
+      if (room.phase.startsWith('SHOWDOWN') && !room.isSettled) return;
 
       p.isReady = ready;
       p.isDone = false;

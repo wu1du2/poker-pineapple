@@ -29,6 +29,7 @@ interface GameState {
   communityCards: Card[];
   billboard: string;
   phase?: string;
+  isSettled?: boolean;
 }
 
 interface MoveLatencyStats {
@@ -73,7 +74,7 @@ const props = defineProps<{
 }>();
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
-const isShowdown = computed(() => props.gameState.phase === 'SHOWDOWN' || props.settlementResults.length > 0);
+const isShowdown = computed(() => props.gameState.phase?.startsWith('SHOWDOWN') || props.settlementResults.length > 0);
 const isArranging = computed(() => props.gameState.phase === 'PLAYING');
 const isInRound = computed(() => isArranging.value || isShowdown.value);
 const mySeat = computed(() => props.mySeatIndex >= 0 ? props.gameState.seats[props.mySeatIndex] : null);
@@ -86,8 +87,16 @@ const primaryActionLabel = computed(() => {
 });
 const primaryActionDisabled = computed(() => {
   if (!mySeat.value) return true;
+  if (isShowdown.value && !props.gameState.isSettled) return true;
   if (!isArranging.value) return false;
   return !mySeat.value.isDone && !props.checkAllSlotsFilled();
+});
+const showdownStatusLabel = computed(() => {
+  if (props.gameState.phase === 'SHOWDOWN_REVEAL') return '亮牌中';
+  if (props.gameState.phase === 'SHOWDOWN_TURN') return '发第四张';
+  if (props.gameState.phase === 'SHOWDOWN_RIVER') return '咪最后一张';
+  if (props.gameState.phase === 'SHOWDOWN_SETTLED') return '已结算';
+  return 'SHOWDOWN';
 });
 const seatStatusLabel = (seat: Player) => {
   if (seat.isAway) return '暂离';
@@ -275,11 +284,20 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
     <section v-if="isShowdown" class="results-panel" data-testid="showdown-results">
       <div class="panel-heading">
         <span>摊牌结果</span>
+        <span>{{ showdownStatusLabel }}</span>
         <span v-if="totalDeltaSum !== 0">Delta {{ totalDeltaSum }}</span>
       </div>
 
       <div class="result-public-board" data-testid="result-public-board">
-        <PokerCard v-for="card in gameState.communityCards" :key="`result-${card.id}`" :card="card" width="28px" />
+        <div
+          v-for="(card, index) in gameState.communityCards"
+          :key="`result-${card.id}`"
+          class="result-public-card"
+          :class="{ 'river-peek': gameState.phase === 'SHOWDOWN_RIVER' && index === gameState.communityCards.length - 1 }"
+          :data-testid="gameState.phase === 'SHOWDOWN_RIVER' && index === gameState.communityCards.length - 1 ? 'river-peek-card' : undefined"
+        >
+          <PokerCard :card="card" width="28px" />
+        </div>
       </div>
 
       <div class="result-grid compact-showdown-grid">
@@ -812,6 +830,33 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   align-items: center;
   justify-content: center;
   gap: 5px;
+}
+
+.result-public-card {
+  display: inline-flex;
+}
+
+.result-public-card.river-peek {
+  animation: river-peek-reveal 900ms ease-out both;
+  transform-origin: bottom center;
+}
+
+@keyframes river-peek-reveal {
+  0% {
+    opacity: 0.18;
+    transform: translateY(14px) rotate(-3deg) scale(0.9);
+    clip-path: inset(0 0 72% 0 round 6px);
+  }
+  55% {
+    opacity: 0.86;
+    transform: translateY(5px) rotate(1deg) scale(0.98);
+    clip-path: inset(0 0 26% 0 round 6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+    clip-path: inset(0 0 0 0 round 6px);
+  }
 }
 
 .result-grid {

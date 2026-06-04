@@ -227,16 +227,32 @@ async function main() {
     await page.waitForSelector('[data-testid="showdown-results"]');
     await page.waitForFunction(() => {
       const state = window.__pokerDebug?.getState()?.gameState;
-      if (!state || state.phase !== 'SHOWDOWN') return false;
+      if (!state || state.phase !== 'SHOWDOWN_REVEAL') return false;
       const seats = state.seats.filter(Boolean);
       const aiSeats = seats.filter((seat) => seat.isBot);
-      return aiSeats.length === 5 && aiSeats.every((seat) => (
+      return state.communityCards?.length === 3 &&
+        state.isSettled === false &&
+        aiSeats.length === 5 && aiSeats.every((seat) => (
         seat.isShowing &&
         [1, 2, 3].every((slotId) => seat.slots?.[slotId]?.every((card) => card.id !== 'hidden'))
       ));
     });
     await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState()?.gameState;
+      return state?.phase === 'SHOWDOWN_TURN' &&
+        state?.communityCards?.length === 4 &&
+        state?.isSettled === false;
+    });
+    await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState()?.gameState;
+      return state?.phase === 'SHOWDOWN_RIVER' &&
+        state?.communityCards?.length === 5 &&
+        state?.isSettled === false &&
+        document.querySelector('[data-testid="river-peek-card"]');
+    });
+    await page.waitForFunction(() => {
       const debugState = window.__pokerDebug?.getState();
+      if (debugState?.gameState?.phase !== 'SHOWDOWN_SETTLED') return false;
       return debugState?.gameState?.communityCards?.length === 5 &&
         debugState?.settlementResults?.length === 6 &&
         document.querySelectorAll('.result-player-card').length === 6;
