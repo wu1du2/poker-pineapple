@@ -53,21 +53,57 @@ async function main() {
     await waitForServer();
 
     const browser = await chromium.launch();
+    const userToken = `solo-ai-${Date.now()}`;
     const context = await browser.newContext({
       viewport: { width: 390, height: 740 },
       deviceScaleFactor: 2,
       isMobile: true
     });
-    await context.addInitScript(() => {
+    await context.addInitScript((token) => {
       localStorage.setItem('poker_ui_mode', 'mobile');
-      localStorage.setItem('poker_user_token', `solo-ai-${Date.now()}`);
-    });
+      localStorage.setItem('poker_user_token', token);
+    }, userToken);
 
     const page = await context.newPage();
     await page.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="room-gate"]');
+    await page.getByTestId('create-room-button').click();
     await page.waitForSelector('[data-testid="mobile-game-view"]');
+    const roomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
+    if (!/^房间 \d{6}$/.test(roomChipText || '')) {
+      throw new Error(`Expected top room id chip, got "${roomChipText}"`);
+    }
+    const roomId = roomChipText.replace('房间 ', '');
+    const friendContext = await browser.newContext({
+      viewport: { width: 390, height: 740 },
+      deviceScaleFactor: 2,
+      isMobile: true
+    });
+    await friendContext.addInitScript((token) => {
+      localStorage.setItem('poker_ui_mode', 'mobile');
+      localStorage.setItem('poker_user_token', token);
+    }, `friend-${Date.now()}`);
+    const friendPage = await friendContext.newPage();
+    await friendPage.goto(`${baseUrl}/?ui=mobile`, { waitUntil: 'networkidle' });
+    await friendPage.waitForSelector('[data-testid="room-gate"]');
+    await friendPage.getByTestId('room-id-input').fill(roomId);
+    await friendPage.getByTestId('join-room-button').click();
+    await friendPage.waitForSelector('[data-testid="mobile-game-view"]');
+    const friendRoomChipText = (await friendPage.getByTestId('room-id-chip').textContent())?.trim();
+    if (friendRoomChipText !== roomChipText) {
+      throw new Error(`Expected friend to join ${roomChipText}, got ${friendRoomChipText}`);
+    }
+    await friendContext.close();
     await page.getByRole('button', { name: '一键入座' }).click();
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 1);
+    const createdRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="mobile-game-view"]');
+    await page.waitForFunction(() => window.__pokerDebug?.getState()?.mySeatIndex === 0);
+    const restoredRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
+    if (restoredRoomChipText !== createdRoomChipText) {
+      throw new Error(`Expected reload to restore room ${createdRoomChipText}, got ${restoredRoomChipText}`);
+    }
     await page.getByRole('button', { name: '加满AI' }).click();
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 6);
     await page.getByRole('button', { name: '准备下一局 ready' }).click();

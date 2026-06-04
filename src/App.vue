@@ -20,6 +20,10 @@ const mySeatIndex = ref(-1);
 const myHand = ref<any[]>([]);
 const mySlots = ref<{ [key: number]: any[] }>({ 1: [], 2: [], 3: [] });
 const userToken = ref('');
+const roomId = ref(localStorage.getItem('poker_room_id') || '');
+const roomInput = ref(roomId.value);
+const hasJoinedRoom = ref(Boolean(roomId.value));
+const roomError = ref('');
 
 // 存储计算结果
 const calculatedResults = ref<{ [key: number]: { [slotId: number]: string } }>({});
@@ -60,6 +64,7 @@ interface Player {
 }
 
 interface GameState {
+  roomId?: string;
   seats: (Player | null)[];
   communityCards: Card[];
   billboard: string;
@@ -103,10 +108,35 @@ onMounted(() => {
   }
 
   socket.on('connect', () => {
-    socket.emit('restore-session', userToken.value);
+    if (roomId.value) {
+      socket.emit('restore-session', { roomId: roomId.value, token: userToken.value });
+    }
   });
 
-  socket.on('session-restored', ({ seatIndex }) => {
+  socket.on('room-joined', ({ roomId: joinedRoomId, state }) => {
+    roomId.value = joinedRoomId;
+    roomInput.value = joinedRoomId;
+    hasJoinedRoom.value = true;
+    roomError.value = '';
+    localStorage.setItem('poker_room_id', joinedRoomId);
+    mySeatIndex.value = -1;
+    Object.assign(gameState, state);
+    syncSettlementFromState(gameState);
+  });
+
+  socket.on('room-error', ({ message }) => {
+    roomError.value = message || '房间不可用';
+    hasJoinedRoom.value = false;
+    localStorage.removeItem('poker_room_id');
+  });
+
+  socket.on('session-restored', ({ seatIndex, roomId: restoredRoomId }) => {
+    if (restoredRoomId) {
+      roomId.value = restoredRoomId;
+      roomInput.value = restoredRoomId;
+      hasJoinedRoom.value = true;
+      localStorage.setItem('poker_room_id', restoredRoomId);
+    }
     mySeatIndex.value = seatIndex;
     socket.emit('get-my-hand', seatIndex, (data: any) => {
       myHand.value = data.hand;
@@ -159,6 +189,29 @@ onMounted(() => {
     window.location.reload();
   });
 });
+
+const createRoom = () => {
+  roomError.value = '';
+  socket.emit('create-room');
+};
+
+const joinRoom = () => {
+  const targetRoomId = roomInput.value.trim();
+  if (!/^\d{6}$/.test(targetRoomId)) {
+    roomError.value = '请输入6位房间号';
+    return;
+  }
+  roomError.value = '';
+  socket.emit('join-room', targetRoomId);
+};
+
+const copyRoomId = async () => {
+  try {
+    await navigator.clipboard?.writeText(roomId.value);
+  } catch {
+    // The room id remains visible if clipboard access is unavailable.
+  }
+};
 
 const sit = (index: number) => {
   if (mySeatIndex.value === -1 && !gameState.seats[index]) {
@@ -341,6 +394,8 @@ declare global {
     __pokerDebug?: {
       calculateAllScores: () => void;
       switchToMobile: () => void;
+      createRoom: () => void;
+      joinRoom: (targetRoomId?: string) => void;
       getState: () => unknown;
     };
   }
@@ -349,7 +404,15 @@ declare global {
 window.__pokerDebug = {
   calculateAllScores,
   switchToMobile: () => setMobileUi(true),
+  createRoom,
+  joinRoom: (targetRoomId?: string) => {
+    if (targetRoomId) roomInput.value = targetRoomId;
+    joinRoom();
+  },
   getState: () => ({
+    roomId: roomId.value,
+    hasJoinedRoom: hasJoinedRoom.value,
+    mySeatIndex: mySeatIndex.value,
     gameState: JSON.parse(JSON.stringify(gameState)),
     calculatedResults: calculatedResults.value,
     settlementResults: JSON.parse(JSON.stringify(settlementResults)),
@@ -359,9 +422,30 @@ window.__pokerDebug = {
 </script>
 
 <template>
+  <main v-if="!hasJoinedRoom" class="room-gate" data-testid="room-gate">
+    <section class="room-gate-panel">
+      <div class="room-gate-title">Pineapple</div>
+      <button type="button" class="room-primary-btn" data-testid="create-room-button" @click="createRoom">
+        新建房间
+      </button>
+      <form class="room-join-form" @submit.prevent="joinRoom">
+        <input
+          v-model="roomInput"
+          inputmode="numeric"
+          maxlength="6"
+          pattern="[0-9]{6}"
+          placeholder="输入6位房间号"
+          data-testid="room-id-input"
+        />
+        <button type="submit" data-testid="join-room-button">加入房间</button>
+      </form>
+      <p v-if="roomError" class="room-error">{{ roomError }}</p>
+    </section>
+  </main>
   <MobileGameView
-    v-if="useMobileUi"
+    v-else-if="useMobileUi"
     :game-state="gameState"
+    :room-id="roomId"
     :my-seat-index="mySeatIndex"
     :my-name="myName"
     :my-hand="myHand"
@@ -384,6 +468,7 @@ window.__pokerDebug = {
     :control="control"
     :calculate-all-scores="calculateAllScores"
     :reset-game="handleHardReset"
+    :copy-room-id="copyRoomId"
   />
   <div v-else class="table-container">
     <button class="ui-switch-btn" @click="setMobileUi(true)">竖屏UI</button>
@@ -604,6 +689,56 @@ window.__pokerDebug = {
 
 <style>
 body { background: #111; color: white; margin: 0; font-family: sans-serif; overflow: hidden; }
+.room-gate {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100dvh;
+  padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
+  background: #14382f;
+  color: #f7fbf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.room-gate-panel {
+  width: min(100%, 360px);
+  display: grid;
+  gap: 12px;
+}
+.room-gate-title {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+}
+.room-primary-btn,
+.room-join-form button {
+  border: 0;
+  border-radius: 8px;
+  min-height: 48px;
+  background: #f8d56b;
+  color: #17342d;
+  font-weight: 900;
+}
+.room-join-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 8px;
+}
+.room-join-form input {
+  box-sizing: border-box;
+  min-height: 48px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(8, 22, 19, 0.78);
+  color: #fff;
+  padding: 0 12px;
+  font-size: 16px;
+}
+.room-error {
+  margin: 0;
+  color: #ffb3b3;
+  font-size: 13px;
+}
 .table-container { height: 100vh; display: flex; justify-content: center; align-items: center; }
 
 .poker-table { 

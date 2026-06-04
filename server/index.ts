@@ -7,6 +7,7 @@ import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
 import { createPlayerState, type Card, type Player } from './playerTypes';
 import { clearSettlementState, settleRoundScores } from './settlement';
+import { createRoomStore, DEFAULT_ROOM_ID, SEAT_COUNT, type RoomState } from './rooms';
 import {
   areRoundParticipantsDone,
   canStartRound,
@@ -44,31 +45,31 @@ class Deck {
 }
 
 const deck = new Deck();
+const roomStore = createRoomStore();
 
-const SEAT_COUNT = 6;
-let dealTurnCount = 0; // 新增：发牌计数
+function joinSocketRoom(socket: Socket, room: RoomState) {
+  const previousRoomId = socket.data.roomId;
+  if (previousRoomId) socket.leave(previousRoomId);
+  socket.data.roomId = room.roomId;
+  socket.join(room.roomId);
+}
 
-const gameState = {
-  seats: new Array(SEAT_COUNT).fill(null) as (Player | null)[],
-  communityCards: [] as Card[],
-  settlementResults: [],
-  winningSlots: {} as Record<number, number[]>,
-  calculatedResults: {} as Record<number, Record<number, string>>,
-  isSettled: false,
-  roundId: 0,
-  roundSeatIndices: [] as number[],
-  // dealerIndex: -1, // 移除庄家索引
-  billboard: "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2",
-  phase: 'LOBBY'
-};
+function getSocketRoom(socket: Socket) {
+  const roomId = socket.data.roomId || DEFAULT_ROOM_ID;
+  return roomStore.getRoom(roomId);
+}
+
+function emitRoomUpdate(room: RoomState) {
+  io.to(room.roomId).emit('update', getPublicState(room));
+}
 
 function isSeatFullyArranged(seat: Player) {
   return [1, 2, 3].every(slotId => (seat.slots?.[slotId]?.length || 0) === 2);
 }
 
-function revealRoundParticipants() {
-  gameState.roundSeatIndices.forEach((seatIndex) => {
-    const seat = gameState.seats[seatIndex];
+function revealRoundParticipants(room: RoomState) {
+  room.roundSeatIndices.forEach((seatIndex) => {
+    const seat = room.seats[seatIndex];
     if (isActiveSeat(seat)) {
       seat.isShowing = true;
       seat.shownSlots = [1, 2, 3];
@@ -76,18 +77,18 @@ function revealRoundParticipants() {
   });
 }
 
-function startNewRound() {
-  if (!canStartRound(gameState.seats)) return;
+function startNewRound(room: RoomState) {
+  if (!canStartRound(room.seats)) return;
 
-  dealTurnCount = 0;
+  room.dealTurnCount = 0;
   deck.reset();
-  gameState.communityCards = [];
-  clearSettlementState(gameState);
-  gameState.roundId += 1;
-  gameState.roundSeatIndices = getReadyActiveSeatIndices(gameState.seats);
-  gameState.phase = 'PLAYING';
+  room.communityCards = [];
+  clearSettlementState(room);
+  room.roundId += 1;
+  room.roundSeatIndices = getReadyActiveSeatIndices(room.seats);
+  room.phase = 'PLAYING';
 
-  gameState.seats.forEach((p, seatIndex) => {
+  room.seats.forEach((p, seatIndex) => {
     if (!p) return;
 
     p.hand = [];
@@ -97,7 +98,7 @@ function startNewRound() {
     p.isShowing = false;
     p.isDone = false;
 
-    if (p.isAway || !isRoundParticipant(gameState.roundSeatIndices, seatIndex)) {
+    if (p.isAway || !isRoundParticipant(room.roundSeatIndices, seatIndex)) {
       p.isReady = false;
       return;
     }
@@ -107,147 +108,186 @@ function startNewRound() {
     arrangeAiHandInOrder(p);
   });
 
-  gameState.communityCards.push(deck.deal(), deck.deal(), deck.deal());
-  io.emit('reset-table');
-  io.emit('update', getPublicState());
+  room.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+  io.to(room.roomId).emit('reset-table');
+  emitRoomUpdate(room);
 }
 
-function completeShowdown() {
-  gameState.phase = 'SHOWDOWN';
-  revealRoundParticipants();
+function completeShowdown(room: RoomState) {
+  room.phase = 'SHOWDOWN';
+  revealRoundParticipants(room);
 
-  while (gameState.communityCards.length < 5) {
-    gameState.communityCards.push(deck.deal());
+  while (room.communityCards.length < 5) {
+    room.communityCards.push(deck.deal());
   }
-  dealTurnCount = Math.max(0, gameState.communityCards.length - 3);
-  settleRoundScores(gameState);
+  room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
+  settleRoundScores(room);
 
-  io.emit('update', getPublicState());
-  io.emit('all-players-ready');
+  emitRoomUpdate(room);
+  io.to(room.roomId).emit('all-players-ready');
   setTimeout(() => {
-    io.emit('auto-calculate');
+    io.to(room.roomId).emit('auto-calculate');
   }, 1000);
 }
 
 app.post('/debug/mock6-showdown', (_req, res) => {
-  dealTurnCount = 2;
+  const room = roomStore.getRoom(DEFAULT_ROOM_ID);
+  room.dealTurnCount = 2;
   const mockState = buildMock6ShowdownState();
-  gameState.seats = mockState.seats;
-  gameState.communityCards = mockState.communityCards;
-  gameState.billboard = mockState.billboard;
-  gameState.phase = mockState.phase;
-  gameState.roundSeatIndices = mockState.seats.map((_, seatIndex) => seatIndex);
-  clearSettlementState(gameState);
-  settleRoundScores(gameState);
-  io.emit('reset-table');
-  io.emit('update', getPublicState());
-  res.json(getPublicState());
+  room.seats = mockState.seats;
+  room.communityCards = mockState.communityCards;
+  room.billboard = mockState.billboard;
+  room.phase = mockState.phase;
+  room.roundSeatIndices = mockState.seats.map((_, seatIndex) => seatIndex);
+  clearSettlementState(room);
+  settleRoundScores(room);
+  io.to(room.roomId).emit('reset-table');
+  emitRoomUpdate(room);
+  res.json(getPublicState(room));
 });
 
 io.on('connection', (socket: Socket) => {
-  socket.emit('init', getPublicState());
+  const defaultRoom = roomStore.getRoom(DEFAULT_ROOM_ID);
+  joinSocketRoom(socket, defaultRoom);
+  socket.emit('init', getPublicState(defaultRoom));
+
+  socket.on('create-room', () => {
+    const room = roomStore.createRoom();
+    joinSocketRoom(socket, room);
+    socket.emit('room-joined', { roomId: room.roomId, state: getPublicState(room) });
+  });
+
+  socket.on('join-room', (roomId: string) => {
+    const normalizedRoomId = String(roomId || '').trim();
+    const room = /^\d{6}$/.test(normalizedRoomId) ? roomStore.findRoom(normalizedRoomId) : undefined;
+    if (!room) {
+      socket.emit('room-error', { message: '房间不存在' });
+      return;
+    }
+    joinSocketRoom(socket, room);
+    socket.emit('room-joined', { roomId: room.roomId, state: getPublicState(room) });
+  });
 
   // --- 新增：会话恢复机制 ---
-  socket.on('restore-session', (token) => {
+  socket.on('restore-session', (payload) => {
+    const token = typeof payload === 'string' ? payload : payload?.token;
+    const requestedRoomId = typeof payload === 'string' ? DEFAULT_ROOM_ID : payload?.roomId;
     if (!token) return;
+    const room = roomStore.findRoom(requestedRoomId || DEFAULT_ROOM_ID);
+    if (!room) {
+      socket.emit('room-error', { message: '房间不存在' });
+      return;
+    }
+    joinSocketRoom(socket, room);
     let found = false;
-    gameState.seats.forEach((seat, index) => {
+    room.seats.forEach((seat, index) => {
       // 如果找到该 Token 对应的座位，更新 Socket ID
       if (seat && seat.token === token) {
         seat.id = socket.id; // 关键：更新为最新的 Socket ID
         found = true;
         // 告诉前端：你已经找回了这个座位
-        socket.emit('session-restored', { seatIndex: index });
+        socket.emit('session-restored', { seatIndex: index, roomId: room.roomId });
       }
     });
     if (found) {
-      console.log(`Player restored session: ${token} -> ${socket.id}`);
-      io.emit('update', getPublicState());
+      console.log(`Player restored session: ${token} -> ${socket.id} in room ${room.roomId}`);
+      emitRoomUpdate(room);
+    } else {
+      socket.emit('room-joined', { roomId: room.roomId, state: getPublicState(room) });
     }
   });
 
   // --- 修改：入座时绑定 Token ---
   socket.on('sit', ({ name, seatIndex, token }) => {
-    if (!gameState.seats[seatIndex]) {
+    const room = getSocketRoom(socket);
+    if (!room.seats[seatIndex]) {
       // const isFirstPlayer = gameState.seats.every(s => s === null); // 移除首位玩家判断
-      gameState.seats[seatIndex] = createPlayerState({
+      room.seats[seatIndex] = createPlayerState({
         id: socket.id,
         token: token, // 绑定 Token
         name
       });
       // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     }
   });
 
   // 新增：切换暂离状态
   socket.on('toggle-away', () => {
-    const seatIndex = gameState.seats.findIndex(s => s && s.id === socket.id);
+    const room = getSocketRoom(socket);
+    const seatIndex = room.seats.findIndex(s => s && s.id === socket.id);
     if (seatIndex !== -1) {
-      const p = gameState.seats[seatIndex];
+      const p = room.seats[seatIndex];
       p.isAway = !p.isAway;
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     }
   });
 
   socket.on('update-name', ({ seatIndex, name }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     if (p) {
       p.name = name.substring(0, 12);
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     }
   });
 
   socket.on('update-score', ({ seatIndex, score }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     if (p) {
       const val = parseInt(score);
       if (!isNaN(val)) {
         p.score = val;
-        io.emit('update', getPublicState());
+        emitRoomUpdate(room);
       }
     }
   });
 
   socket.on('update-billboard', (text) => {
-    gameState.billboard = text;
-    io.emit('update', getPublicState());
+    const room = getSocketRoom(socket);
+    room.billboard = text;
+    emitRoomUpdate(room);
   });
 
   socket.on('fold', ({ seatIndex }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     // 增加 ID 校验，防止旧连接操作，且暂离玩家不可操作
     if (p && p.id === socket.id && !p.isAway) {
       p.isFolded = true;
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     }
   });
 
   socket.on('show-hand', ({ seatIndex }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     if (p && p.id === socket.id && !p.isAway) {
       p.isShowing = true; 
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     }
   });
 
   socket.on('show-slot', ({ seatIndex, slotId }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     if (p && p.id === socket.id && !p.isAway) {
       if (!p.shownSlots.includes(slotId)) {
         p.shownSlots.push(slotId);
-        io.emit('update', getPublicState());
+        emitRoomUpdate(room);
       }
     }
   });
 
   socket.on('move-card', ({ seatIndex, cardId, target }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     // 严格校验 ID，且暂离玩家不可操作
     if (!p || p.id !== socket.id || p.isAway) return; 
     
     // 防误触：只有在 PLAYING 阶段允许移牌
-    if (gameState.phase !== 'PLAYING') return;
+    if (room.phase !== 'PLAYING') return;
     if (p.isDone) return;
 
     let sourceLocation = 'hand';
@@ -290,69 +330,72 @@ io.on('connection', (socket: Socket) => {
       p.slots[slotNum].push(card);
     }
 
-    io.emit('update', getPublicState());
+    emitRoomUpdate(room);
   });
 
   socket.on('control', (action) => {
+    const room = getSocketRoom(socket);
     if (action === 'fill-ai') {
-      fillEmptySeatsWithAi(gameState.seats);
-      io.emit('update', getPublicState());
+      fillEmptySeatsWithAi(room.seats);
+      emitRoomUpdate(room);
     } else if (action === 'new-game') {
-      startNewRound();
+      startNewRound(room);
     } else if (action === 'deal-turn') {
       // 防误触：只有在 SHOWDOWN 阶段允许发牌
-      if (gameState.phase !== 'SHOWDOWN') {
+      if (room.phase !== 'SHOWDOWN') {
          console.log("Not in SHOWDOWN phase, skipping deal-turn");
          return;
       }
       
       // 校验是否所有人都已完成摆牌 (双重保险)
-      if (!areRoundParticipantsDone(gameState.seats, gameState.roundSeatIndices)) {
+      if (!areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
         console.log("Not all players done, skipping deal-turn");
         return;
       }
 
-      dealTurnCount++; // 发牌计数加1
-      gameState.communityCards.push(deck.deal());
-      if (gameState.communityCards.length >= 5) {
-        settleRoundScores(gameState);
+      room.dealTurnCount++; // 发牌计数加1
+      room.communityCards.push(deck.deal());
+      if (room.communityCards.length >= 5) {
+        settleRoundScores(room);
       }
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
       
-      if (dealTurnCount === 2) { // 计数达到2
+      if (room.dealTurnCount === 2) { // 计数达到2
         setTimeout(() => {
-          io.emit('auto-calculate'); // 广播自动算分事件
+          io.to(room.roomId).emit('auto-calculate'); // 广播自动算分事件
         }, 1000); // 延迟1秒
       }
     }
     else if (action === 'deal-river') {
-      gameState.communityCards.push(deck.deal());
-      if (gameState.phase === 'SHOWDOWN' && gameState.communityCards.length >= 5) {
-        settleRoundScores(gameState);
+      room.communityCards.push(deck.deal());
+      if (room.phase === 'SHOWDOWN' && room.communityCards.length >= 5) {
+        settleRoundScores(room);
       }
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
     } else if (action === 'settle-scores') {
-      settleRoundScores(gameState);
-      io.emit('update', getPublicState());
+      settleRoundScores(room);
+      emitRoomUpdate(room);
     }
   });
 
   socket.on('hard-reset', () => {
+      const room = getSocketRoom(socket);
       deck.reset();
-      gameState.communityCards = [];
+      room.communityCards = [];
       // gameState.dealerIndex = -1; // 移除庄家重置
-      gameState.seats = new Array(SEAT_COUNT).fill(null);
-      gameState.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
-      clearSettlementState(gameState);
-      gameState.roundId = 0;
-      gameState.roundSeatIndices = [];
-      gameState.phase = 'LOBBY';
-      io.emit('update', getPublicState());
-      io.emit('force-reload');
+      room.seats = new Array(SEAT_COUNT).fill(null);
+      room.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
+      clearSettlementState(room);
+      room.roundId = 0;
+      room.roundSeatIndices = [];
+      room.phase = 'LOBBY';
+      emitRoomUpdate(room);
+      io.to(room.roomId).emit('force-reload');
     });
 
   socket.on('get-my-hand', (seatIndex, callback) => {
-      const p = gameState.seats[seatIndex];
+      const room = getSocketRoom(socket);
+      const p = room.seats[seatIndex];
       // 这里的 p.id 已经是 restore-session 更新过的最新 ID
       if (p && p.id === socket.id) {
         callback({ hand: p.hand, slots: p.slots });
@@ -363,37 +406,38 @@ io.on('connection', (socket: Socket) => {
 
   // 新增：处理Ready事件
   socket.on('ready', ({ seatIndex, ready }) => {
-    const p = gameState.seats[seatIndex];
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
     if (p && p.id === socket.id && !p.isAway) {
-      if (gameState.phase === 'PLAYING') {
-        if (!isRoundParticipant(gameState.roundSeatIndices, seatIndex)) return;
+      if (room.phase === 'PLAYING') {
+        if (!isRoundParticipant(room.roundSeatIndices, seatIndex)) return;
         if (ready && !isSeatFullyArranged(p)) return;
 
         p.isDone = ready;
 
-        if (areRoundParticipantsDone(gameState.seats, gameState.roundSeatIndices)) {
-          completeShowdown();
+        if (areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
+          completeShowdown(room);
         } else {
-          io.emit('update', getPublicState());
+          emitRoomUpdate(room);
         }
         return;
       }
 
       p.isReady = ready;
       p.isDone = false;
-      io.emit('update', getPublicState());
+      emitRoomUpdate(room);
 
-      if (canStartRound(gameState.seats)) {
-        startNewRound();
+      if (canStartRound(room.seats)) {
+        startNewRound(room);
       }
     }
   });
 });
 
-function getPublicState() {
+function getPublicState(room: RoomState) {
   return {
-    ...gameState,
-    seats: gameState.seats.map(s => {
+    ...room,
+    seats: room.seats.map(s => {
       if (!s) return null;
       
       const publicSlots: Record<number, Partial<Card>[]> = { 1: [], 2: [], 3: [] };

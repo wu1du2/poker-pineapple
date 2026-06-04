@@ -33,6 +33,7 @@ interface GameState {
 
 const props = defineProps<{
   gameState: GameState;
+  roomId: string;
   mySeatIndex: number;
   myName: string;
   myHand: Card[];
@@ -55,6 +56,7 @@ const props = defineProps<{
   control: (action: string) => void;
   calculateAllScores: () => void;
   resetGame: () => void;
+  copyRoomId: () => void;
 }>();
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
@@ -122,6 +124,9 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <div class="mobile-title">Pineapple</div>
         <div class="mobile-subtitle">{{ seatedPlayers }}/6 入座 · 总分 {{ totalScore }}</div>
       </div>
+      <button type="button" class="room-chip" data-testid="room-id-chip" @click="copyRoomId">
+        房间 {{ roomId }}
+      </button>
       <details class="top-menu" data-testid="mobile-top-menu">
         <summary aria-label="更多操作">...</summary>
         <div class="top-menu-content">
@@ -366,6 +371,18 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .mobile-subtitle {
   color: #b9ccc6;
   font-size: 12px;
+}
+
+.room-chip {
+  border: 0;
+  border-radius: 7px;
+  background: #f8d56b;
+  color: #17342d;
+  font-size: 12px;
+  font-weight: 900;
+  min-height: 34px;
+  padding: 0 10px;
+  white-space: nowrap;
 }
 
 .icon-text-btn,

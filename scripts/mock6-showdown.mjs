@@ -78,6 +78,7 @@ async function main() {
       });
       await context.addInitScript((token) => {
         localStorage.setItem('poker_user_token', token);
+        localStorage.setItem('poker_room_id', '000000');
         localStorage.setItem('poker_ui_mode', 'mobile');
       }, `debug-token-${index}`);
       contexts.push(context);
