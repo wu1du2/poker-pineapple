@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed, watch } from 'vue';
+import { reactive, ref, onMounted, computed, watch, nextTick } from 'vue';
 import { io } from 'socket.io-client';
 import PokerCard from './components/PokerCard.vue';
 import MobileGameView from './views/MobileGameView.vue';
@@ -75,11 +75,39 @@ interface GameState {
   isSettled?: boolean;
 }
 
+interface MoveLatencyStats {
+  count: number;
+  pendingMoveId: number | null;
+  lastMoveId: number | null;
+  lastRoundTripMs: number;
+  avgRoundTripMs: number;
+  maxRoundTripMs: number;
+  lastAckMs: number;
+  lastServerMs: number;
+  lastRenderMs: number;
+}
+
 const gameState = reactive<GameState>({
   seats: new Array(6).fill(null),
   communityCards: [],
   billboard: ''
 });
+
+const moveLatencyStats = reactive<MoveLatencyStats>({
+  count: 0,
+  pendingMoveId: null,
+  lastMoveId: null,
+  lastRoundTripMs: 0,
+  avgRoundTripMs: 0,
+  maxRoundTripMs: 0,
+  lastAckMs: 0,
+  lastServerMs: 0,
+  lastRenderMs: 0
+});
+
+const pendingMoves = new Map<number, { emittedAt: number; ackAt?: number }>();
+const moveRoundTripSamples: number[] = [];
+let moveSequence = 0;
 
 const totalScore = computed(() => {
   return gameState.seats.reduce((sum, seat) => sum + (seat ? seat.score : 0), 0);
@@ -176,6 +204,7 @@ onMounted(() => {
       socket.emit('get-my-hand', mySeatIndex.value, (data: any) => {
         myHand.value = data.hand;
         mySlots.value = data.slots;
+        recordMoveUpdateCommit();
       });
       // 新增：同步更新前端ready状态
       const mySeat = gameState.seats[mySeatIndex.value];
@@ -270,6 +299,71 @@ const checkAllSlotsFilled = () => {
   if (mySeatIndex.value === -1) return false;
   const mySlotsData = mySlots.value;
   return Object.values(mySlotsData).every(slot => slot.length === 2);
+};
+
+const recordMoveUpdateCommit = () => {
+  if (pendingMoves.size === 0) return;
+
+  const updateAt = performance.now();
+  const movesToRecord = Array.from(pendingMoves.entries());
+
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const renderAt = performance.now();
+
+      movesToRecord.forEach(([moveId, pending]) => {
+        if (!pendingMoves.has(moveId)) return;
+
+        const roundTripMs = Math.max(1, Math.round(updateAt - pending.emittedAt));
+        moveRoundTripSamples.push(roundTripMs);
+        if (moveRoundTripSamples.length > 100) moveRoundTripSamples.shift();
+
+        const totalRoundTrip = moveRoundTripSamples.reduce((sum, value) => sum + value, 0);
+        moveLatencyStats.count += 1;
+        moveLatencyStats.lastMoveId = moveId;
+        moveLatencyStats.lastRoundTripMs = roundTripMs;
+        moveLatencyStats.avgRoundTripMs = Math.max(1, Math.round(totalRoundTrip / moveRoundTripSamples.length));
+        moveLatencyStats.maxRoundTripMs = Math.max(...moveRoundTripSamples);
+        moveLatencyStats.lastRenderMs = Math.max(0, Math.round(renderAt - updateAt));
+
+        pendingMoves.delete(moveId);
+      });
+
+      moveLatencyStats.pendingMoveId = pendingMoves.size > 0
+        ? Math.max(...Array.from(pendingMoves.keys()))
+        : null;
+    });
+  });
+};
+
+const emitMoveCard = (cardId: string, target: string | number) => {
+  if (mySeatIndex.value === -1) return;
+
+  const moveId = ++moveSequence;
+  const emittedAt = performance.now();
+  pendingMoves.set(moveId, { emittedAt });
+  moveLatencyStats.pendingMoveId = moveId;
+
+  socket.emit(
+    'move-card',
+    { seatIndex: mySeatIndex.value, cardId, target, moveId },
+    (ack?: { ok?: boolean; moveId?: number; serverMs?: number }) => {
+      const pending = pendingMoves.get(moveId);
+      if (!pending) return;
+
+      const ackAt = performance.now();
+      pending.ackAt = ackAt;
+      moveLatencyStats.lastAckMs = Math.max(0, Math.round(ackAt - pending.emittedAt));
+      moveLatencyStats.lastServerMs = Math.max(0, Math.round(Number(ack?.serverMs) || 0));
+
+      if (ack && ack.ok === false) {
+        pendingMoves.delete(moveId);
+        moveLatencyStats.pendingMoveId = pendingMoves.size > 0
+          ? Math.max(...Array.from(pendingMoves.keys()))
+          : null;
+      }
+    }
+  );
 };
 
 const toggleReady = () => {
@@ -368,7 +462,7 @@ const clickHandCard = (card: Card) => {
     }
   }
   if (targetSlot !== 0) {
-    socket.emit('move-card', { seatIndex: mySeatIndex.value, cardId: card.id, target: targetSlot });
+    emitMoveCard(card.id, targetSlot);
   } else {
     alert("牌槽已满！请先移除一些牌。");
   }
@@ -376,7 +470,7 @@ const clickHandCard = (card: Card) => {
 
 const clickSlotCard = (card: Card) => {
   if (mySeatIndex.value === -1) return;
-  socket.emit('move-card', { seatIndex: mySeatIndex.value, cardId: card.id, target: 'hand' });
+  emitMoveCard(card.id, 'hand');
 };
 
 const getSeatStyle = (index: number) => {
@@ -416,7 +510,8 @@ window.__pokerDebug = {
     gameState: JSON.parse(JSON.stringify(gameState)),
     calculatedResults: calculatedResults.value,
     settlementResults: JSON.parse(JSON.stringify(settlementResults)),
-    totalDeltaSum: totalDeltaSum.value
+    totalDeltaSum: totalDeltaSum.value,
+    moveLatencyStats: JSON.parse(JSON.stringify(moveLatencyStats))
   })
 };
 </script>
@@ -469,6 +564,7 @@ window.__pokerDebug = {
     :calculate-all-scores="calculateAllScores"
     :reset-game="handleHardReset"
     :copy-room-id="copyRoomId"
+    :move-latency-stats="moveLatencyStats"
   />
   <div v-else class="table-container">
     <button class="ui-switch-btn" @click="setMobileUi(true)">竖屏UI</button>

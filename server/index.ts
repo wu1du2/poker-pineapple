@@ -29,6 +29,20 @@ app.use(express.static(path.join(__dirname, '../dist')));
 const SUITS = ['♠', '♥', '♣', '♦'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
+interface MoveCardPayload {
+  seatIndex: number;
+  cardId: string;
+  target: string | number;
+  moveId?: number;
+}
+
+interface MoveCardAck {
+  ok: boolean;
+  moveId?: number;
+  serverMs: number;
+  reason?: string;
+}
+
 class Deck {
   cards: Card[] = [];
   constructor() { this.reset(); }
@@ -280,15 +294,34 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('move-card', ({ seatIndex, cardId, target }) => {
+  socket.on('move-card', ({ seatIndex, cardId, target, moveId }: MoveCardPayload, ack?: (payload: MoveCardAck) => void) => {
+    const startedAt = Date.now();
+    const respond = (ok: boolean, reason?: string) => {
+      ack?.({
+        ok,
+        moveId,
+        serverMs: Date.now() - startedAt,
+        ...(reason ? { reason } : {})
+      });
+    };
+
     const room = getSocketRoom(socket);
     const p = room.seats[seatIndex];
     // 严格校验 ID，且暂离玩家不可操作
-    if (!p || p.id !== socket.id || p.isAway) return; 
+    if (!p || p.id !== socket.id || p.isAway) {
+      respond(false, 'invalid-seat');
+      return;
+    }
     
     // 防误触：只有在 PLAYING 阶段允许移牌
-    if (room.phase !== 'PLAYING') return;
-    if (p.isDone) return;
+    if (room.phase !== 'PLAYING') {
+      respond(false, 'wrong-phase');
+      return;
+    }
+    if (p.isDone) {
+      respond(false, 'already-done');
+      return;
+    }
 
     let sourceLocation = 'hand';
     let cardIndex = p.hand.findIndex((c: any) => c.id === cardId);
@@ -308,18 +341,30 @@ io.on('connection', (socket: Socket) => {
       }
     }
 
-    if (!card) return; 
+    if (!card) {
+      respond(false, 'missing-card');
+      return;
+    }
 
     if (target === 'hand') {
-      if (sourceLocation === 'hand') return; 
+      if (sourceLocation === 'hand') {
+        respond(false, 'already-in-hand');
+        return;
+      }
       const slotNum = parseInt(sourceLocation.split('-')[1]);
       p.slots[slotNum].splice(cardIndex, 1);
       p.hand.push(card);
     } 
     else {
-      const slotNum = parseInt(target);
-      if (isNaN(slotNum) || slotNum < 1 || slotNum > 3) return;
-      if (p.slots[slotNum].length >= 2) return;
+      const slotNum = parseInt(String(target));
+      if (isNaN(slotNum) || slotNum < 1 || slotNum > 3) {
+        respond(false, 'invalid-target');
+        return;
+      }
+      if (p.slots[slotNum].length >= 2) {
+        respond(false, 'slot-full');
+        return;
+      }
 
       if (sourceLocation === 'hand') {
         p.hand.splice(cardIndex, 1);
@@ -331,6 +376,7 @@ io.on('connection', (socket: Socket) => {
     }
 
     emitRoomUpdate(room);
+    respond(true);
   });
 
   socket.on('control', (action) => {

@@ -31,6 +31,18 @@ interface GameState {
   phase?: string;
 }
 
+interface MoveLatencyStats {
+  count: number;
+  pendingMoveId: number | null;
+  lastMoveId: number | null;
+  lastRoundTripMs: number;
+  avgRoundTripMs: number;
+  maxRoundTripMs: number;
+  lastAckMs: number;
+  lastServerMs: number;
+  lastRenderMs: number;
+}
+
 const props = defineProps<{
   gameState: GameState;
   roomId: string;
@@ -57,6 +69,7 @@ const props = defineProps<{
   calculateAllScores: () => void;
   resetGame: () => void;
   copyRoomId: () => void;
+  moveLatencyStats: MoveLatencyStats;
 }>();
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
@@ -134,6 +147,11 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       <details class="top-menu" data-testid="mobile-top-menu">
         <summary aria-label="更多操作">...</summary>
         <div class="top-menu-content">
+          <div class="latency-panel" data-testid="move-latency-panel">
+            <span>move {{ moveLatencyStats.lastRoundTripMs }}ms</span>
+            <span>avg {{ moveLatencyStats.avgRoundTripMs }} / max {{ moveLatencyStats.maxRoundTripMs }}</span>
+            <span>ack {{ moveLatencyStats.lastAckMs }} · srv {{ moveLatencyStats.lastServerMs }} · ui {{ moveLatencyStats.lastRenderMs }}</span>
+          </div>
           <button type="button" @click="resetGame">重置游戏</button>
           <button type="button" disabled>教程</button>
         </div>
@@ -431,7 +449,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   right: 0;
   top: calc(100% + 6px);
   z-index: 4;
-  width: 128px;
+  width: 188px;
   padding: 6px;
   border-radius: 8px;
   background: rgba(8, 22, 19, 0.98);
@@ -442,6 +460,15 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .top-menu button:disabled {
   opacity: 0.45;
+}
+
+.latency-panel {
+  color: #b9ccc6;
+  display: grid;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 2px 4px;
 }
 
 .seat-strip {

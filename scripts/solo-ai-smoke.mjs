@@ -170,6 +170,17 @@ async function main() {
     for (let index = 0; index < 6; index++) {
       await page.locator('.hand-rail .hand-card-btn').first().click();
     }
+    await page.waitForFunction(() => {
+      const stats = window.__pokerDebug?.getState()?.moveLatencyStats;
+      return stats &&
+        stats.count >= 6 &&
+        stats.lastRoundTripMs > 0 &&
+        stats.avgRoundTripMs > 0 &&
+        stats.maxRoundTripMs > 0 &&
+        stats.lastAckMs >= 0 &&
+        stats.lastServerMs >= 0 &&
+        stats.lastRenderMs >= 0;
+    });
     await page.getByRole('button', { name: '牌放好了 done' }).click();
     await page.waitForSelector('[data-testid="showdown-results"]');
     await page.waitForFunction(() => {
