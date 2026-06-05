@@ -133,6 +133,13 @@ const formatDelta = (value: number) => {
   return String(value);
 };
 
+const formatTotalDelta = (settlement: SlotSettlementResult | undefined) => {
+  if (!settlement) return '0';
+  const total = formatDelta(settlement.totalDelta);
+  if (!settlement.totalLoserDelta) return total;
+  return `${total} (${formatDelta(settlement.totalLoserDelta)})`;
+};
+
 const getMySlotCard = (slotId: number, cellIndex: number) => {
   return props.mySlots[slotId]?.[cellIndex - 1];
 };
@@ -313,8 +320,11 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
               {{ seat.name }}
               <span v-if="seatIndex === mySeatIndex" class="mine-badge">我</span>
             </strong>
-            <span :class="{ positive: (findSettlement(seatIndex)?.totalDelta || 0) > 0, negative: (findSettlement(seatIndex)?.totalDelta || 0) < 0 }">
-              {{ formatDelta(findSettlement(seatIndex)?.totalDelta || 0) }}
+            <span
+              class="result-total-delta"
+              :class="{ positive: (findSettlement(seatIndex)?.totalDelta || 0) > 0, negative: (findSettlement(seatIndex)?.totalDelta || 0) < 0 }"
+            >
+              {{ formatTotalDelta(findSettlement(seatIndex)) }}
             </span>
           </div>
 
@@ -886,6 +896,13 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.result-total-delta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: 0;
 }
 
 .mine-badge {

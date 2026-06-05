@@ -300,6 +300,19 @@ async function main() {
     if (!visibleSlotTypeLabels) {
       throw new Error('Expected every showdown slot to show a visible hand-type label');
     }
+    const visibleTotalLoserDeltas = await page.evaluate(() => {
+      const debugState = window.__pokerDebug?.getState();
+      const settlements = debugState?.settlementResults || [];
+      const expectedLabels = settlements
+        .filter((result) => result.totalLoserDelta !== 0)
+        .map((result) => `${result.totalDelta > 0 ? '+' : ''}${result.totalDelta} (${result.totalLoserDelta > 0 ? '+' : ''}${result.totalLoserDelta})`);
+      const playerHeads = [...document.querySelectorAll('.result-player-head')].map((head) => head.textContent || '');
+      return expectedLabels.length > 0 &&
+        expectedLabels.every((label) => playerHeads.some((headText) => headText.includes(label)));
+    });
+    if (!visibleTotalLoserDeltas) {
+      throw new Error('Expected player total deltas to include visible total-loser adjustment in parentheses');
+    }
     const readyButtonInResultHeader = await page.evaluate(() => {
       const header = document.querySelector('[data-testid="showdown-results"] .panel-heading');
       return Boolean(header?.querySelector('button'));

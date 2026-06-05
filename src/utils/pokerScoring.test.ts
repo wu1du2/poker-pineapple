@@ -130,6 +130,9 @@ describe('Poker Scoring Logic', () => {
       expect(result.find(r => r.seatIndex === 1)?.totalDelta).toBe(50 - 30 + 30); // 50
       expect(result.find(r => r.seatIndex === 2)?.totalDelta).toBe(-50 + 30 + 30); // 10
       expect(result.find(r => r.seatIndex === 3)?.totalDelta).toBe(0 - 60); // -60
+      expect(result.find(r => r.seatIndex === 1)?.totalLoserDelta).toBe(30);
+      expect(result.find(r => r.seatIndex === 2)?.totalLoserDelta).toBe(30);
+      expect(result.find(r => r.seatIndex === 3)?.totalLoserDelta).toBe(-60);
       
       // 总分数变化量之和应该为0
       const totalDelta = result.reduce((sum, r) => sum + r.totalDelta, 0);
@@ -168,6 +171,8 @@ describe('Poker Scoring Logic', () => {
       // 预期：不执行任何惩罚和获益
       expect(result.find(r => r.seatIndex === 1)?.totalDelta).toBe(50 - 30); // 20
       expect(result.find(r => r.seatIndex === 2)?.totalDelta).toBe(-50 + 30); // -20
+      expect(result.find(r => r.seatIndex === 1)?.totalLoserDelta).toBe(0);
+      expect(result.find(r => r.seatIndex === 2)?.totalLoserDelta).toBe(0);
       
       // 总分数变化量之和应该为0
       const totalDelta = result.reduce((sum, r) => sum + r.totalDelta, 0);
@@ -210,6 +215,9 @@ describe('Poker Scoring Logic', () => {
       expect(result.find(r => r.seatIndex === 1)?.totalDelta).toBe(50 + 60); // 110
       expect(result.find(r => r.seatIndex === 2)?.totalDelta).toBe(-25 - 30); // -55
       expect(result.find(r => r.seatIndex === 3)?.totalDelta).toBe(-25 - 30); // -55
+      expect(result.find(r => r.seatIndex === 1)?.totalLoserDelta).toBe(60);
+      expect(result.find(r => r.seatIndex === 2)?.totalLoserDelta).toBe(-30);
+      expect(result.find(r => r.seatIndex === 3)?.totalLoserDelta).toBe(-30);
       
       // 总分数变化量之和应该为0
       const totalDelta = result.reduce((sum, r) => sum + r.totalDelta, 0);
