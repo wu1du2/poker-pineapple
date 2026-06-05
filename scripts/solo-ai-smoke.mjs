@@ -319,6 +319,18 @@ async function main() {
     if (!visibleSlotTypeLabels) {
       throw new Error('Expected every showdown slot to show a visible hand-type label');
     }
+    const coloredSlotTypeLabels = await page.evaluate(() => {
+      const labels = [...document.querySelectorAll('.result-slot-label span')];
+      const tierClasses = labels
+        .filter((label) => label instanceof HTMLElement)
+        .map((label) => [...label.classList].find((className) => className.startsWith('type-tier-')));
+      return labels.length === 18 &&
+        tierClasses.every(Boolean) &&
+        new Set(tierClasses).size >= 2;
+    });
+    if (!coloredSlotTypeLabels) {
+      throw new Error('Expected every showdown hand-type label to have a visible strength tier color class');
+    }
     const visibleTotalLoserDeltas = await page.evaluate(() => {
       const debugState = window.__pokerDebug?.getState();
       const settlements = debugState?.settlementResults || [];

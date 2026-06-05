@@ -128,6 +128,15 @@ const slotResultLabel = (seatIndex: number, slotId: number) => {
   return props.calculatedResults[seatIndex]?.[slotId]?.split(' ')[0] || '未计算';
 };
 
+const handTypeTierClass = (label: string) => {
+  if (label === '同花顺' || label === '皇家同花顺') return 'type-tier-legendary';
+  if (label === '四条') return 'type-tier-premium';
+  if (['葫芦', '同花', '顺子'].includes(label)) return 'type-tier-made';
+  if (label === '三条') return 'type-tier-trips';
+  if (label === '高牌') return 'type-tier-low';
+  return 'type-tier-pair';
+};
+
 const formatDelta = (value: number) => {
   if (value > 0) return `+${value}`;
   return String(value);
@@ -336,7 +345,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
           >
             <div class="result-slot-label">
               <strong :style="{ color: multiplierColors[slotId] }">{{ slotMultipliers[slotId] }}</strong>
-              <span>{{ slotResultLabel(seatIndex, slotId) }}</span>
+              <span :class="handTypeTierClass(slotResultLabel(seatIndex, slotId))">{{ slotResultLabel(seatIndex, slotId) }}</span>
               <em>{{ formatDelta(slotDelta(findSettlement(seatIndex), slotId)) }}</em>
             </div>
             <div class="result-cards compact-result-cards">
@@ -968,6 +977,33 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   font-size: 9px;
   line-height: 1;
   white-space: nowrap;
+  font-weight: 800;
+}
+
+.result-slot-label span.type-tier-legendary {
+  color: #f8d56b;
+  text-shadow: 0 0 5px rgba(248, 213, 107, 0.42);
+}
+
+.result-slot-label span.type-tier-premium {
+  color: #d6a8ff;
+  text-shadow: 0 0 5px rgba(214, 168, 255, 0.32);
+}
+
+.result-slot-label span.type-tier-made {
+  color: #8ecaff;
+}
+
+.result-slot-label span.type-tier-trips {
+  color: #69f0ae;
+}
+
+.result-slot-label span.type-tier-pair {
+  color: #f1f6f4;
+}
+
+.result-slot-label span.type-tier-low {
+  color: #94aaa3;
 }
 
 .result-slot-label em {
