@@ -178,6 +178,44 @@ async function main() {
     if (!simplifiedActionsVisible) {
       throw new Error('Expected mobile UI to remove reveal button and expose reset/tutorial in top menu');
     }
+    await page.getByTestId('mobile-top-menu').locator('summary').click();
+    await page.getByRole('button', { name: '教程' }).click();
+    await page.waitForSelector('[data-testid="tutorial-dialog"]');
+    let tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
+    if (tutorialTitle !== '放好六张牌') {
+      throw new Error(`Expected tutorial page 1 title, got "${tutorialTitle}"`);
+    }
+    if (await page.getByRole('button', { name: '上一页' }).isEnabled()) {
+      throw new Error('Expected tutorial previous button to be disabled on the first page');
+    }
+    await page.getByRole('button', { name: '下一页' }).click();
+    tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
+    const tutorialBody = (await page.getByTestId('tutorial-body').textContent()) || '';
+    if (tutorialTitle !== '七选五比大小' || !tutorialBody.includes('A♠ 9♠') || !tutorialBody.includes('同花')) {
+      throw new Error('Expected tutorial page 2 to explain seven-card best-five with a flush example');
+    }
+    await page.getByRole('button', { name: '下一页' }).click();
+    tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
+    if (tutorialTitle !== '田忌赛马，冲高倍 or 保底') {
+      throw new Error(`Expected tutorial page 3 title, got "${tutorialTitle}"`);
+    }
+    await page.getByRole('button', { name: '下一页' }).click();
+    tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
+    if (tutorialTitle !== '小心别通输') {
+      throw new Error(`Expected tutorial page 4 title, got "${tutorialTitle}"`);
+    }
+    if (await page.getByRole('button', { name: '下一页' }).isEnabled()) {
+      throw new Error('Expected tutorial next button to be disabled on the last page');
+    }
+    await page.getByRole('button', { name: '上一页' }).click();
+    tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
+    if (tutorialTitle !== '田忌赛马，冲高倍 or 保底') {
+      throw new Error('Expected tutorial previous button to return to page 3');
+    }
+    await page.getByRole('button', { name: '返回' }).click();
+    if (await page.locator('[data-testid="tutorial-dialog"]').count() !== 0) {
+      throw new Error('Expected tutorial return button to close the dialog');
+    }
 
     let delayedMoveRequests = 0;
     await page.route('**/socket.io/**', async (route) => {

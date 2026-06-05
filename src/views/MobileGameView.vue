@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import PokerCard from '../components/PokerCard.vue';
 import type { SlotSettlementResult } from '../utils/pokerScoring';
 
@@ -44,6 +44,11 @@ interface MoveLatencyStats {
   lastRenderMs: number;
 }
 
+interface TutorialPage {
+  title: string;
+  body: string[];
+}
+
 const props = defineProps<{
   gameState: GameState;
   roomId: string;
@@ -72,6 +77,72 @@ const props = defineProps<{
   copyRoomId: () => void;
   moveLatencyStats: MoveLatencyStats;
 }>();
+
+const tutorialPages: TutorialPage[] = [
+  {
+    title: '放好六张牌',
+    body: [
+      '你会拿到 7 张手牌。',
+      '从中选 6 张，分别放进 3 组牌：',
+      '5倍区：2 张',
+      '3倍区：2 张',
+      '1倍区：2 张',
+      '剩下 1 张不用。',
+      '三组都放满后，点击“牌放好了 done”。'
+    ]
+  },
+  {
+    title: '七选五比大小',
+    body: [
+      '每组 2 张牌，会和 5 张公共牌合成 7 张。',
+      '系统会自动从这 7 张里选出最大的 5 张牌。',
+      '例子：你的这一组是 A♠ 9♠。',
+      '公共牌是 K♠ 7♠ 3♠ A♥ 2♣。',
+      '这 7 张里可以选出 A♠ K♠ 9♠ 7♠ 3♠，所以这一组是“同花”。',
+      '牌型从大到小：皇家同花顺 > 同花顺 > 四条 > 葫芦 > 同花 > 顺子 > 三条 > 两对 > 一对 > 高牌。'
+    ]
+  },
+  {
+    title: '田忌赛马，冲高倍 or 保底',
+    body: [
+      '三组牌倍率不同：5倍区最重要，3倍区其次，1倍区保底。',
+      '你可以把最强的 2 张放进 5倍区冲高分。',
+      '也可以把牌分散，保证至少赢一组。',
+      '关键不是每组都强，而是让强牌赢在更值钱的位置。'
+    ]
+  },
+  {
+    title: '小心别通输',
+    body: [
+      '如果三组牌都没赢，算作通输。',
+      '通输会有额外扣分。',
+      '至少赢过一组的玩家，会分到额外加分。',
+      '结算页总分旁边的括号，就是通输/通赢调整。',
+      '例如：+96 (+20)、-39 (-20)。'
+    ]
+  }
+];
+
+const isTutorialOpen = ref(false);
+const tutorialPageIndex = ref(0);
+const tutorialPage = computed<TutorialPage>(() => tutorialPages[tutorialPageIndex.value] || tutorialPages[0] as TutorialPage);
+
+const openTutorial = () => {
+  tutorialPageIndex.value = 0;
+  isTutorialOpen.value = true;
+};
+
+const closeTutorial = () => {
+  isTutorialOpen.value = false;
+};
+
+const previousTutorialPage = () => {
+  tutorialPageIndex.value = Math.max(0, tutorialPageIndex.value - 1);
+};
+
+const nextTutorialPage = () => {
+  tutorialPageIndex.value = Math.min(tutorialPages.length - 1, tutorialPageIndex.value + 1);
+};
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
 const isShowdown = computed(() => props.gameState.phase?.startsWith('SHOWDOWN') || props.settlementResults.length > 0);
@@ -178,10 +249,27 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
             <span>ack {{ moveLatencyStats.lastAckMs }} · srv {{ moveLatencyStats.lastServerMs }} · ui {{ moveLatencyStats.lastRenderMs }}</span>
           </div>
           <button type="button" @click="resetGame">重置游戏</button>
-          <button type="button" disabled>教程</button>
+          <button type="button" @click="openTutorial">教程</button>
         </div>
       </details>
     </header>
+
+    <div v-if="isTutorialOpen" class="tutorial-overlay" data-testid="tutorial-dialog">
+      <section class="tutorial-panel" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+        <div class="tutorial-header">
+          <span>{{ tutorialPageIndex + 1 }}/{{ tutorialPages.length }}</span>
+          <h2 id="tutorial-title" data-testid="tutorial-title">{{ tutorialPage.title }}</h2>
+        </div>
+        <div class="tutorial-body" data-testid="tutorial-body">
+          <p v-for="line in tutorialPage.body" :key="line">{{ line }}</p>
+        </div>
+        <div class="tutorial-actions">
+          <button type="button" @click="closeTutorial">返回</button>
+          <button type="button" :disabled="tutorialPageIndex === 0" @click="previousTutorialPage">上一页</button>
+          <button type="button" :disabled="tutorialPageIndex === tutorialPages.length - 1" @click="nextTutorialPage">下一页</button>
+        </div>
+      </section>
+    </div>
 
     <section class="seat-strip" :class="{ compact: isInRound }" aria-label="座位">
       <button
@@ -506,6 +594,79 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .top-menu button:disabled {
   opacity: 0.45;
+}
+
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(3, 10, 8, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.tutorial-panel {
+  width: min(100%, 360px);
+  max-height: calc(100dvh - 36px);
+  border-radius: 8px;
+  background: #0b201b;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.38);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tutorial-header {
+  display: grid;
+  gap: 4px;
+}
+
+.tutorial-header span {
+  color: #f8d56b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tutorial-header h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.tutorial-body {
+  display: grid;
+  gap: 7px;
+  color: #e6f0ec;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.tutorial-body p {
+  margin: 0;
+}
+
+.tutorial-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tutorial-actions button {
+  border: 0;
+  border-radius: 7px;
+  min-height: 38px;
+  background: #244b40;
+  color: #fff;
+  font-weight: 900;
+}
+
+.tutorial-actions button:disabled {
+  opacity: 0.4;
 }
 
 .latency-panel {
