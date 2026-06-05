@@ -342,7 +342,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
             <div class="result-cards compact-result-cards">
               <template v-for="(card, cardIndex) in (seat.slots[slotId] || [])" :key="`${slotId}-${cardIndex}`">
                 <div v-if="card.id === 'hidden'" class="mobile-card-back"></div>
-                <PokerCard v-else :card="card" width="16px" />
+                <PokerCard v-else :card="card" width="34px" />
               </template>
             </div>
           </div>
@@ -870,12 +870,12 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .result-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
 
 .result-player-card {
-  padding: 3px;
+  padding: 4px 3px;
   min-width: 0;
 }
 
@@ -887,7 +887,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .result-player-head {
   margin-bottom: 2px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.1;
 }
 
@@ -901,7 +901,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 .result-total-delta {
   flex: 0 0 auto;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0;
 }
 
@@ -932,10 +932,10 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 2px 3px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr) 40px;
   align-items: center;
   gap: 2px;
-  min-height: 27px;
+  min-height: 39px;
 }
 
 .result-slot + .result-slot {
@@ -944,8 +944,10 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .result-slot-label {
   min-width: 0;
+  flex-wrap: wrap;
   justify-content: flex-start;
   gap: 2px;
+  line-height: 1;
 }
 
 .result-slot-label strong,
@@ -954,7 +956,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .result-slot-label strong {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .result-slot-label span {
@@ -962,13 +964,14 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 24px;
   font-size: 9px;
   line-height: 1;
   white-space: nowrap;
 }
 
 .result-slot-label em {
-  margin-left: auto;
+  margin-left: 0;
   font-style: normal;
   font-weight: 800;
   font-size: 10px;
@@ -985,9 +988,9 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .compact-result-cards :deep(.card-placeholder) {
-  transform: scale(0.8);
+  transform: scale(0.68);
   transform-origin: right center;
-  margin-left: -5px;
+  margin-left: -11px;
 }
 
 .showdown-ready-action {

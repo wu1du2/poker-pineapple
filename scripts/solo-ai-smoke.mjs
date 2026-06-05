@@ -287,6 +287,25 @@ async function main() {
     if (!settledShowdownFitsFirstViewport) {
       throw new Error('Expected settled showdown results and next-round ready button to fit in the first mobile viewport');
     }
+    const showdownGridIsTwoRowsThreeColumns = await page.evaluate(() => {
+      const resultCards = [...document.querySelectorAll('.result-player-card')];
+      if (resultCards.length !== 6) return false;
+      const tops = [...new Set(resultCards.map((card) => Math.round(card.getBoundingClientRect().top)))];
+      const lefts = [...new Set(resultCards.map((card) => Math.round(card.getBoundingClientRect().left)))];
+      return tops.length === 2 && lefts.length === 3;
+    });
+    if (!showdownGridIsTwoRowsThreeColumns) {
+      throw new Error('Expected settled showdown grid to use two rows and three columns');
+    }
+    const showdownCardsAreReadable = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.compact-result-cards .card-placeholder')];
+      if (cards.length !== 36) return false;
+      const widths = cards.map((card) => card.getBoundingClientRect().width);
+      return Math.min(...widths) >= 20;
+    });
+    if (!showdownCardsAreReadable) {
+      throw new Error('Expected showdown slot cards to be readable at 20px or wider');
+    }
     const visibleSlotTypeLabels = await page.evaluate(() => {
       const labels = [...document.querySelectorAll('.result-slot-label span')];
       return labels.length === 18 && labels.every((label) => {
