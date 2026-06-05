@@ -269,14 +269,36 @@ async function main() {
     if (!(await nextRoundReadyButton.isEnabled())) {
       throw new Error('Expected next-round ready button to be enabled after showdown');
     }
-    const readyButtonInBottomBar = await page.evaluate(() => {
+    const settledShowdownFitsFirstViewport = await page.evaluate(() => {
+      const shell = document.querySelector('.mobile-game-shell');
       const button = document.querySelector('[data-testid="showdown-bottom-ready"]');
-      const results = document.querySelector('[data-testid="showdown-results"]');
-      if (!(button instanceof HTMLElement) || !(results instanceof HTMLElement)) return false;
-      return button.getBoundingClientRect().top >= results.getBoundingClientRect().bottom;
+      const resultCards = [...document.querySelectorAll('.result-player-card')];
+      if (!(shell instanceof HTMLElement) || !(button instanceof HTMLElement) || resultCards.length !== 6) return false;
+      shell.scrollTop = 0;
+      const shellRect = shell.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return buttonRect.top >= shellRect.top &&
+        buttonRect.bottom <= shellRect.bottom &&
+        resultCards.every((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.top >= shellRect.top && rect.top < shellRect.bottom;
+        });
     });
-    if (!readyButtonInBottomBar) {
-      throw new Error('Expected next-round ready button below showdown results');
+    if (!settledShowdownFitsFirstViewport) {
+      throw new Error('Expected settled showdown results and next-round ready button to fit in the first mobile viewport');
+    }
+    const visibleSlotTypeLabels = await page.evaluate(() => {
+      const labels = [...document.querySelectorAll('.result-slot-label span')];
+      return labels.length === 18 && labels.every((label) => {
+        if (!(label instanceof HTMLElement)) return false;
+        const style = getComputedStyle(label);
+        return label.textContent?.trim() &&
+          Number.parseFloat(style.fontSize) >= 8 &&
+          label.getBoundingClientRect().width > 0;
+      });
+    });
+    if (!visibleSlotTypeLabels) {
+      throw new Error('Expected every showdown slot to show a visible hand-type label');
     }
     const readyButtonInResultHeader = await page.evaluate(() => {
       const header = document.querySelector('[data-testid="showdown-results"] .panel-heading');
