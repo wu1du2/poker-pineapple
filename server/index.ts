@@ -136,6 +136,7 @@ function startNewRound(room: RoomState) {
     p.isShowing = false;
     p.isDone = false;
     p.isSurrendered = false;
+    p.surrenderCooldown = Math.max(0, (p.surrenderCooldown || 0) - 1);
 
     if (p.isAway || !isRoundParticipant(room.roundSeatIndices, seatIndex)) {
       p.isReady = false;
@@ -297,10 +298,12 @@ io.on('connection', (socket: Socket) => {
     if (!p || p.id !== socket.id || p.isAway) return;
     if (room.phase !== 'PLAYING') return;
     if (!isRoundParticipant(room.roundSeatIndices, seatIndex)) return;
+    if ((p.surrenderCooldown || 0) > 0) return;
 
     p.isSurrendered = true;
     p.isDone = true;
     p.isReady = false;
+    p.surrenderCooldown = 10;
     emitRoomUpdate(room);
 
     if (areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
@@ -560,9 +563,10 @@ io.on('connection', (socket: Socket) => {
   socket.on('ready', ({ seatIndex, ready }) => {
     const room = getSocketRoom(socket);
     const p = room.seats[seatIndex];
-    if (p && p.id === socket.id && !p.isAway && !p.isSurrendered) {
+    if (p && p.id === socket.id && !p.isAway) {
       if (room.phase === 'PLAYING') {
         if (!isRoundParticipant(room.roundSeatIndices, seatIndex)) return;
+        if (p.isSurrendered) return;
         if (ready && !isSeatFullyArranged(p)) return;
 
         p.isDone = ready;

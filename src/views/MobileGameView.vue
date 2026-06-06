@@ -23,6 +23,7 @@ interface Player {
   isDone: boolean;
   isAway: boolean;
   isSurrendered?: boolean;
+  surrenderCooldown?: number;
 }
 
 interface ScoreboardEntry {
@@ -204,6 +205,13 @@ const primaryActionDisabled = computed(() => {
   if (mySeat.value.isSurrendered) return true;
   return !mySeat.value.isDone && !props.checkAllSlotsFilled();
 });
+const surrenderActionLabel = computed(() => {
+  const cooldown = mySeat.value?.surrenderCooldown || 0;
+  if (cooldown > 0) return `${cooldown}回合后可用`;
+  if (mySeat.value?.isSurrendered) return '已认输';
+  return '认输';
+});
+const surrenderActionDisabled = computed(() => Boolean(mySeat.value?.isSurrendered || (mySeat.value?.surrenderCooldown || 0) > 0));
 const showdownStatusLabel = computed(() => {
   if (props.gameState.phase === 'SHOWDOWN_REVEAL') return '亮牌中';
   if (props.gameState.phase === 'SHOWDOWN_TURN') return '发第四张';
@@ -415,10 +423,10 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         <button
           type="button"
           class="secondary-action surrender-action"
-          :disabled="mySeat.isSurrendered"
+          :disabled="surrenderActionDisabled"
           @click="surrender"
         >
-          {{ mySeat.isSurrendered ? '已认输' : '认输' }}
+          {{ surrenderActionLabel }}
         </button>
         <button
           type="button"

@@ -61,6 +61,7 @@ export function buildMock6ShowdownState(): DebugGameState {
       isDone: true,
       isAway: false,
       isSurrendered: false,
+      surrenderCooldown: 0,
       isBot: false
     });
   }

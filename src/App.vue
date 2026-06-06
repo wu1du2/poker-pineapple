@@ -61,6 +61,7 @@ interface Player {
   isDone: boolean;
   isAway: boolean; // 新增：暂离状态
   isSurrendered?: boolean;
+  surrenderCooldown?: number;
   isBot?: boolean;
 }
 
@@ -838,10 +839,10 @@ window.__pokerDebug = {
               <button 
                 class="ready-btn btn-warning" 
                 :class="{ 'active': seat.isSurrendered }"
-                :disabled="seat.isSurrendered"
+                :disabled="seat.isSurrendered || (seat.surrenderCooldown || 0) > 0"
                 @click="surrender"
                 title="认输">
-                {{ seat.isSurrendered ? '已认输' : '认输' }}
+                {{ (seat.surrenderCooldown || 0) > 0 ? `${seat.surrenderCooldown}回合后可用` : (seat.isSurrendered ? '已认输' : '认输') }}
               </button>
             </div>
           </div>

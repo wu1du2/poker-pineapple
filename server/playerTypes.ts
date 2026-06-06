@@ -19,6 +19,7 @@ export interface Player {
   isDone: boolean;
   isAway: boolean;
   isSurrendered: boolean;
+  surrenderCooldown: number;
   isBot: boolean;
 }
 
@@ -44,6 +45,7 @@ export function createPlayerState(options: CreatePlayerStateOptions): Player {
     isDone: false,
     isAway: false,
     isSurrendered: false,
+    surrenderCooldown: 0,
     isBot: Boolean(options.isBot)
   };
 }

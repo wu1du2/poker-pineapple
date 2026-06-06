@@ -110,7 +110,24 @@ async function main() {
       throw new Error(`Expected surrender settlement to remain zero-sum, got ${totalDeltaSum}`);
     }
 
-    await fs.writeFile(path.join(runDir, 'surrender-state.json'), JSON.stringify(finalState, null, 2));
+    await page.getByRole('button', { name: '准备下一局 ready' }).click();
+    await page.waitForFunction(() => {
+      const debugState = window.__pokerDebug?.getState();
+      const seat = debugState?.gameState?.seats?.[0];
+      return debugState?.gameState?.phase === 'PLAYING' &&
+        seat?.isSurrendered === false &&
+        seat?.isDone === false &&
+        debugState?.gameState?.communityCards?.length === 3;
+    }, { timeout: 5000 });
+
+    const nextRoundState = await page.evaluate(() => window.__pokerDebug?.getState());
+    const surrenderCooldownButton = page.getByRole('button', { name: '9回合后可用', exact: true });
+    await surrenderCooldownButton.waitFor();
+    if (await surrenderCooldownButton.isEnabled()) {
+      throw new Error('Expected surrender button to be disabled while cooldown is active');
+    }
+
+    await fs.writeFile(path.join(runDir, 'surrender-state.json'), JSON.stringify({ finalState, nextRoundState }, null, 2));
     await page.screenshot({ path: path.join(runDir, 'surrender-settled.png'), fullPage: false });
     await fs.writeFile(
       path.join(runDir, 'summary.md'),
@@ -118,7 +135,7 @@ async function main() {
         '# Surrender Smoke Run',
         '',
         `- URL: ${baseUrl}/?ui=mobile`,
-        '- Flow: sit -> fill AI -> ready -> surrender -> auto showdown',
+        '- Flow: sit -> fill AI -> ready -> surrender -> auto showdown -> ready next round',
         '- Button screenshot: surrender-button-before-click.png',
         '- Screenshot: surrender-settled.png',
         '- State: surrender-state.json',
