@@ -397,10 +397,10 @@ async function main() {
       const cards = [...document.querySelectorAll('.compact-result-cards .card-placeholder')];
       if (cards.length !== 36) return false;
       const widths = cards.map((card) => card.getBoundingClientRect().width);
-      return Math.min(...widths) >= 20;
+      return Math.min(...widths) >= 26;
     });
     if (!showdownCardsAreReadable) {
-      throw new Error('Expected showdown slot cards to be readable at 20px or wider');
+      throw new Error('Expected showdown slot cards to be readable at 26px or wider');
     }
     const visibleSlotTypeLabels = await page.evaluate(() => {
       const labels = [...document.querySelectorAll('.result-slot-label span')];

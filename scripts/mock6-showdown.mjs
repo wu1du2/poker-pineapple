@@ -105,6 +105,17 @@ async function main() {
     if (publicCardCount !== 5) {
       throw new Error(`Expected 5 public cards in result board, found ${publicCardCount}`);
     }
+    const readablePublicCards = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('[data-testid="result-public-board"] .card-placeholder')];
+      if (cards.length !== 5) return false;
+      return cards.every((card) => {
+        if (!(card instanceof HTMLElement)) return false;
+        return card.getBoundingClientRect().width >= 34;
+      });
+    });
+    if (!readablePublicCards) {
+      throw new Error('Expected result public cards to render at 34px or wider');
+    }
     const resultSlotCardCount = await page.evaluate(() => {
       return [...document.querySelectorAll('.result-slot .result-cards .card-placeholder')]
         .filter((card) => {
@@ -115,6 +126,15 @@ async function main() {
     });
     if (resultSlotCardCount !== 36) {
       throw new Error(`Expected all 36 placed cards in compact results, found ${resultSlotCardCount}`);
+    }
+    const readableSlotCards = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.compact-result-cards .card-placeholder')];
+      if (cards.length !== 36) return false;
+      const widths = cards.map((card) => card.getBoundingClientRect().width);
+      return Math.min(...widths) >= 26;
+    });
+    if (!readableSlotCards) {
+      throw new Error('Expected showdown slot cards to render at 26px or wider');
     }
     const showdownLayout = await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
