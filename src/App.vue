@@ -255,11 +255,19 @@ const toggleAway = () => {
   socket.emit('toggle-away');
 };
 
+const renameDisplayName = (name: string) => {
+  const nextName = name.trim().slice(0, 12);
+  if (!nextName) return;
+
+  myName.value = nextName;
+  if (mySeatIndex.value !== -1) {
+    socket.emit('update-name', { seatIndex: mySeatIndex.value, name: nextName });
+  }
+};
+
 const updateMyName = (e: Event) => {
   const input = e.target as HTMLInputElement;
-  if (mySeatIndex.value !== -1) {
-    socket.emit('update-name', { seatIndex: mySeatIndex.value, name: input.value });
-  }
+  renameDisplayName(input.value);
 };
 
 const updateBillboard = (e: Event) => {
@@ -579,6 +587,7 @@ window.__pokerDebug = {
     :check-all-slots-filled="checkAllSlotsFilled"
     :sit="sit"
     :update-my-name="updateMyName"
+    :rename-display-name="renameDisplayName"
     :click-hand-card="clickHandCard"
     :click-slot-card="clickSlotCard"
     :toggle-ready="toggleReady"

@@ -67,6 +67,7 @@ const props = defineProps<{
   checkAllSlotsFilled: () => boolean;
   sit: (index: number) => void;
   updateMyName: (event: Event) => void;
+  renameDisplayName: (name: string) => void;
   clickHandCard: (card: Card) => void;
   clickSlotCard: (card: Card) => void;
   toggleReady: () => void;
@@ -142,6 +143,12 @@ const previousTutorialPage = () => {
 
 const nextTutorialPage = () => {
   tutorialPageIndex.value = Math.min(tutorialPages.length - 1, tutorialPageIndex.value + 1);
+};
+
+const promptRename = () => {
+  const currentName = mySeat.value?.name || props.myName;
+  const nextName = window.prompt('输入新的显示名字', currentName);
+  if (nextName !== null) props.renameDisplayName(nextName);
 };
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
@@ -249,6 +256,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
             <span>ack {{ moveLatencyStats.lastAckMs }} · srv {{ moveLatencyStats.lastServerMs }} · ui {{ moveLatencyStats.lastRenderMs }}</span>
           </div>
           <button type="button" @click="resetGame">重置游戏</button>
+          <button type="button" @click="promptRename">修改名字</button>
           <button type="button" @click="openTutorial">教程</button>
         </div>
       </details>

@@ -106,8 +106,16 @@ async function main() {
       throw new Error(`Expected friend to join ${roomChipText}, got ${friendRoomChipText}`);
     }
     await friendContext.close();
+    await page.getByTestId('mobile-top-menu').locator('summary').click();
+    page.once('dialog', async (dialog) => {
+      await dialog.accept('桌主A');
+    });
+    await page.getByRole('button', { name: '修改名字' }).click();
     await page.getByRole('button', { name: '一键入座' }).click();
-    await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 1);
+    await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState()?.gameState;
+      return state?.seats?.filter(Boolean).length === 1 && state.seats[0]?.name === '桌主A';
+    });
     const createdRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="mobile-game-view"]');
@@ -116,6 +124,13 @@ async function main() {
     if (restoredRoomChipText !== createdRoomChipText) {
       throw new Error(`Expected reload to restore room ${createdRoomChipText}, got ${restoredRoomChipText}`);
     }
+    await page.getByTestId('mobile-top-menu').locator('summary').click();
+    page.once('dialog', async (dialog) => {
+      await dialog.accept('桌主B');
+    });
+    await page.getByRole('button', { name: '修改名字' }).click();
+    await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.[0]?.name === '桌主B');
+    await page.getByTestId('mobile-top-menu').locator('summary').click();
     await page.getByRole('button', { name: '加满AI' }).click();
     await page.waitForFunction(() => window.__pokerDebug?.getState()?.gameState?.seats?.filter(Boolean).length === 6);
     await page.getByRole('button', { name: '准备下一局 ready' }).click();
