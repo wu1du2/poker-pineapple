@@ -1330,7 +1330,7 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 1px 2px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px;
+  grid-template-columns: minmax(0, 1fr) 54px;
   align-items: center;
   gap: 2px;
   min-height: 38px;
@@ -1342,15 +1342,20 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 
 .result-slot-label {
   min-width: 0;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr;
+  align-items: end;
+  justify-content: start;
+  column-gap: 2px;
+  row-gap: 1px;
   line-height: 1;
+  height: 100%;
 }
 
 .result-slot-label strong,
 .result-slot-label em {
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .result-slot-label strong {
@@ -1362,7 +1367,6 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1 1 24px;
   font-size: 8px;
   line-height: 1;
   white-space: nowrap;
@@ -1396,6 +1400,9 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
 }
 
 .result-slot-label em {
+  grid-column: 1 / -1;
+  align-self: start;
+  justify-self: start;
   margin-left: 0;
   font-style: normal;
   font-weight: 800;

@@ -136,6 +136,25 @@ async function main() {
     if (!readableSlotCards) {
       throw new Error('Expected showdown slot cards to render at 26px or wider');
     }
+    const slotDeltasAvoidCards = await page.evaluate(() => {
+      const slots = [...document.querySelectorAll('.result-slot')];
+      if (slots.length !== 18) return false;
+      return slots.every((slot) => {
+        if (!(slot instanceof HTMLElement)) return false;
+        const delta = slot.querySelector('.result-slot-label em');
+        const cards = slot.querySelector('.result-cards');
+        if (!(delta instanceof HTMLElement) || !(cards instanceof HTMLElement)) return false;
+        const slotRect = slot.getBoundingClientRect();
+        const deltaRect = delta.getBoundingClientRect();
+        const cardsRect = cards.getBoundingClientRect();
+        return deltaRect.left <= slotRect.left + 10 &&
+          deltaRect.right <= cardsRect.left - 4 &&
+          deltaRect.bottom <= slotRect.bottom - 2;
+      });
+    });
+    if (!slotDeltasAvoidCards) {
+      throw new Error('Expected every slot delta to stay fixed in the lower-left and avoid card overlap');
+    }
     const showdownLayout = await page.evaluate(() => {
       const shell = document.querySelector('.mobile-game-shell');
       if (shell instanceof HTMLElement) shell.scrollTop = 0;
