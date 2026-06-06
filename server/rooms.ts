@@ -14,6 +14,39 @@ export interface ScoreboardEntry {
   seatIndex: number | null;
 }
 
+export interface RoomHealthCheck {
+  roundId: number;
+  phase: string;
+  ok: boolean;
+  severity: 'ok' | 'warning' | 'error';
+  message: string;
+  anomalies: string[];
+  blockers: string[];
+  checkedAt: string;
+}
+
+export interface RoundHistoryEntry {
+  roundId: number;
+  settledAt: string;
+  participantSeatIndices: number[];
+  participants: Array<{
+    seatIndex: number;
+    name: string;
+    isBot: boolean;
+    score: number;
+    scoreDelta: number;
+    isReady: boolean;
+    isDone: boolean;
+    isAway: boolean;
+    isSurrendered: boolean;
+  }>;
+  communityCards: Card[];
+  settlementResults: SlotSettlementResult[];
+  healthOk: boolean;
+  anomalies: string[];
+  totalDeltaSum: number;
+}
+
 export interface RoomState {
   roomId: string;
   seats: (Player | null)[];
@@ -28,6 +61,9 @@ export interface RoomState {
   dealTurnCount: number;
   billboard: string;
   phase: string;
+  roundClosed: boolean;
+  lastHealthCheck: RoomHealthCheck | null;
+  roundHistory: RoundHistoryEntry[];
 }
 
 export function createRoomState(roomId: string): RoomState {
@@ -44,7 +80,10 @@ export function createRoomState(roomId: string): RoomState {
     roundSeatIndices: [],
     dealTurnCount: 0,
     billboard: BILLBOARD,
-    phase: 'LOBBY'
+    phase: 'LOBBY',
+    roundClosed: false,
+    lastHealthCheck: null,
+    roundHistory: []
   };
 }
 

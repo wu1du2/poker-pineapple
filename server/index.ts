@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
+import { describeRoomProgress } from './roomDiagnostics';
+import { finalizeRound } from './roundFinalizer';
 import { createPlayerState, type Card, type Player } from './playerTypes';
 import { clearSettlementState, settleRoundScores } from './settlement';
 import {
@@ -68,11 +70,19 @@ class Deck {
 const deck = new Deck();
 const roomStore = createRoomStore();
 const revealTimers = new Map<string, NodeJS.Timeout[]>();
+const roomDebugEvents = new Map<string, Array<{ at: string; type: string; details?: Record<string, unknown> }>>();
+
+function recordRoomEvent(room: RoomState, type: string, details?: Record<string, unknown>) {
+  const events = roomDebugEvents.get(room.roomId) || [];
+  events.push({ at: new Date().toISOString(), type, details });
+  roomDebugEvents.set(room.roomId, events.slice(-80));
+}
 
 function clearRevealTimers(room: RoomState) {
   const timers = revealTimers.get(room.roomId) || [];
   timers.forEach((timer) => clearTimeout(timer));
   revealTimers.delete(room.roomId);
+  if (timers.length > 0) recordRoomEvent(room, 'clear-reveal-timers', { count: timers.length });
 }
 
 function scheduleReveal(room: RoomState, delayMs: number, callback: () => void) {
@@ -115,16 +125,26 @@ function revealRoundParticipants(room: RoomState) {
 }
 
 function startNewRound(room: RoomState) {
-  if (!canStartRound(room.seats)) return;
+  if (!canStartRound(room.seats)) {
+    recordRoomEvent(room, 'start-round-blocked', {
+      diagnostics: describeRoomProgress(room, { pendingRevealTimers: revealTimers.get(room.roomId)?.length || 0 })
+    });
+    return;
+  }
 
   clearRevealTimers(room);
   room.dealTurnCount = 0;
   deck.reset();
   room.communityCards = [];
   clearSettlementState(room);
+  room.roundClosed = false;
   room.roundId += 1;
   room.roundSeatIndices = getReadyActiveSeatIndices(room.seats);
   room.phase = 'PLAYING';
+  recordRoomEvent(room, 'start-round', {
+    roundId: room.roundId,
+    roundSeatIndices: room.roundSeatIndices
+  });
 
   room.seats.forEach((p, seatIndex) => {
     if (!p) return;
@@ -159,6 +179,10 @@ function completeShowdown(room: RoomState) {
   const revealRoundId = room.roundId;
   room.phase = 'SHOWDOWN_REVEAL';
   revealRoundParticipants(room);
+  recordRoomEvent(room, 'showdown-reveal', {
+    roundId: revealRoundId,
+    roundSeatIndices: room.roundSeatIndices
+  });
 
   emitRoomUpdate(room);
 
@@ -169,6 +193,7 @@ function completeShowdown(room: RoomState) {
     }
     room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
     room.phase = 'SHOWDOWN_TURN';
+    recordRoomEvent(room, 'showdown-turn', { roundId: revealRoundId, communityCount: room.communityCards.length });
     emitRoomUpdate(room);
   });
 
@@ -179,6 +204,7 @@ function completeShowdown(room: RoomState) {
     }
     room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
     room.phase = 'SHOWDOWN_RIVER';
+    recordRoomEvent(room, 'showdown-river', { roundId: revealRoundId, communityCount: room.communityCards.length });
     emitRoomUpdate(room);
   });
 
@@ -187,7 +213,17 @@ function completeShowdown(room: RoomState) {
     settleRoundScores(room);
     syncScoreboardFromSeats(room);
     room.phase = 'SHOWDOWN_SETTLED';
+    const healthReport = finalizeRound(room, { pendingRevealTimers: revealTimers.get(room.roomId)?.length || 0 });
+    recordRoomEvent(room, 'showdown-settled', {
+      roundId: revealRoundId,
+      communityCount: room.communityCards.length,
+      settlementCount: room.settlementResults.length,
+      healthOk: healthReport.ok
+    });
     emitRoomUpdate(room);
+    if (!healthReport.ok) {
+      io.to(room.roomId).emit('room-health-error', healthReport);
+    }
     io.to(room.roomId).emit('all-players-ready');
     io.to(room.roomId).emit('auto-calculate');
   });
@@ -208,6 +244,21 @@ app.post('/debug/mock6-showdown', (_req, res) => {
   io.to(room.roomId).emit('reset-table');
   emitRoomUpdate(room);
   res.json(getPublicState(room));
+});
+
+app.get('/debug/rooms/:roomId/progress', (req, res) => {
+  const room = roomStore.findRoom(req.params.roomId);
+  if (!room) {
+    res.status(404).json({ error: 'room not found' });
+    return;
+  }
+
+  res.json({
+    diagnostics: describeRoomProgress(room, { pendingRevealTimers: revealTimers.get(room.roomId)?.length || 0 }),
+    lastHealthCheck: room.lastHealthCheck,
+    roundHistory: room.roundHistory,
+    recentEvents: roomDebugEvents.get(room.roomId) || []
+  });
 });
 
 io.on('connection', (socket: Socket) => {
@@ -274,6 +325,7 @@ io.on('connection', (socket: Socket) => {
       });
       restoreSeatScoreFromScoreboard(room, player);
       room.seats[seatIndex] = player;
+      recordRoomEvent(room, 'sit', { seatIndex, name: player.name, isBot: player.isBot });
       // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
       syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
@@ -304,6 +356,7 @@ io.on('connection', (socket: Socket) => {
     p.isDone = true;
     p.isReady = false;
     p.surrenderCooldown = 10;
+    recordRoomEvent(room, 'surrender', { seatIndex, roundId: room.roundId });
     emitRoomUpdate(room);
 
     if (areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
@@ -330,6 +383,7 @@ io.on('connection', (socket: Socket) => {
     if (!kickedSeat) return;
 
     room.seats[targetSeatIndex] = null;
+    recordRoomEvent(room, 'kick-seat', { seatIndex: targetSeatIndex, name: kickedSeat.name });
     syncScoreboardFromSeats(room);
     io.to(kickedSeat.id).emit('seat-kicked', { seatIndex: targetSeatIndex, roomId: room.roomId });
 
@@ -482,7 +536,8 @@ io.on('connection', (socket: Socket) => {
   socket.on('control', (action) => {
     const room = getSocketRoom(socket);
     if (action === 'fill-ai') {
-      fillEmptySeatsWithAi(room.seats);
+      const added = fillEmptySeatsWithAi(room.seats);
+      recordRoomEvent(room, 'fill-ai', { added });
       room.seats.forEach((seat) => {
         if (seat) restoreSeatScoreFromScoreboard(room, seat);
       });
@@ -543,6 +598,9 @@ io.on('connection', (socket: Socket) => {
       clearSettlementState(room);
       room.roundId = 0;
       room.roundSeatIndices = [];
+      room.roundClosed = false;
+      room.lastHealthCheck = null;
+      room.roundHistory = [];
       room.phase = 'LOBBY';
       emitRoomUpdate(room);
       io.to(room.roomId).emit('force-reload');
@@ -570,6 +628,12 @@ io.on('connection', (socket: Socket) => {
         if (ready && !isSeatFullyArranged(p)) return;
 
         p.isDone = ready;
+        recordRoomEvent(room, 'done-toggle', {
+          seatIndex,
+          ready,
+          roundId: room.roundId,
+          diagnostics: describeRoomProgress(room, { pendingRevealTimers: revealTimers.get(room.roomId)?.length || 0 })
+        });
 
         if (areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
           completeShowdown(room);
@@ -583,6 +647,12 @@ io.on('connection', (socket: Socket) => {
 
       p.isReady = ready;
       p.isDone = false;
+      recordRoomEvent(room, 'ready-toggle', {
+        seatIndex,
+        ready,
+        phase: room.phase,
+        diagnostics: describeRoomProgress(room, { pendingRevealTimers: revealTimers.get(room.roomId)?.length || 0 })
+      });
       emitRoomUpdate(room);
 
       if (canStartRound(room.seats)) {

@@ -35,6 +35,17 @@ interface ScoreboardEntry {
   seatIndex: number | null;
 }
 
+interface RoomHealthCheck {
+  roundId: number;
+  phase: string;
+  ok: boolean;
+  severity: 'ok' | 'warning' | 'error';
+  message: string;
+  anomalies: string[];
+  blockers: string[];
+  checkedAt: string;
+}
+
 interface GameState {
   seats: (Player | null)[];
   scoreboard?: ScoreboardEntry[];
@@ -42,6 +53,7 @@ interface GameState {
   billboard: string;
   phase?: string;
   isSettled?: boolean;
+  lastHealthCheck?: RoomHealthCheck | null;
 }
 
 interface MoveLatencyStats {
@@ -89,6 +101,7 @@ const props = defineProps<{
   calculateAllScores: () => void;
   resetGame: () => void;
   copyRoomId: () => void;
+  healthAlert: RoomHealthCheck | null;
   moveLatencyStats: MoveLatencyStats;
 }>();
 
@@ -334,6 +347,12 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
         </div>
       </details>
     </header>
+
+    <section v-if="healthAlert" class="health-alert" data-testid="room-health-alert">
+      <strong>牌局状态异常</strong>
+      <span>{{ healthAlert.message }}</span>
+      <small>Round {{ healthAlert.roundId }} · {{ healthAlert.phase }}</small>
+    </section>
 
     <div v-if="isTutorialOpen" class="tutorial-overlay" data-testid="tutorial-dialog">
       <section class="tutorial-panel" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
@@ -605,6 +624,26 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.health-alert {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 119, 119, 0.58);
+  background: rgba(92, 18, 22, 0.94);
+  color: #fff3f3;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.health-alert strong {
+  font-size: 13px;
+}
+
+.health-alert small {
+  color: rgba(255, 235, 235, 0.76);
 }
 
 .mobile-title {

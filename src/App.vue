@@ -74,6 +74,17 @@ interface ScoreboardEntry {
   seatIndex: number | null;
 }
 
+interface RoomHealthCheck {
+  roundId: number;
+  phase: string;
+  ok: boolean;
+  severity: 'ok' | 'warning' | 'error';
+  message: string;
+  anomalies: string[];
+  blockers: string[];
+  checkedAt: string;
+}
+
 interface GameState {
   roomId?: string;
   seats: (Player | null)[];
@@ -85,6 +96,7 @@ interface GameState {
   winningSlots?: { [key: number]: number[] };
   calculatedResults?: { [key: number]: { [slotId: number]: string } };
   isSettled?: boolean;
+  lastHealthCheck?: RoomHealthCheck | null;
 }
 
 interface MoveLatencyStats {
@@ -104,6 +116,7 @@ const gameState = reactive<GameState>({
   communityCards: [],
   billboard: ''
 });
+const healthAlert = ref<RoomHealthCheck | null>(null);
 
 const moveLatencyStats = reactive<MoveLatencyStats>({
   count: 0,
@@ -221,9 +234,14 @@ onMounted(() => {
     calculateAllScores();
   });
 
+  socket.on('room-health-error', (report: RoomHealthCheck) => {
+    healthAlert.value = report;
+  });
+
   socket.on('update', (state) => {
     Object.assign(gameState, state);
     syncSettlementFromState(gameState);
+    healthAlert.value = state.lastHealthCheck && !state.lastHealthCheck.ok ? state.lastHealthCheck : null;
 
     if (mySeatIndex.value !== -1 && !gameState.seats[mySeatIndex.value]) {
       clearLocalSeatState();
@@ -577,6 +595,7 @@ window.__pokerDebug = {
     calculatedResults: calculatedResults.value,
     settlementResults: JSON.parse(JSON.stringify(settlementResults)),
     totalDeltaSum: totalDeltaSum.value,
+    healthAlert: healthAlert.value ? JSON.parse(JSON.stringify(healthAlert.value)) : null,
     moveLatencyStats: JSON.parse(JSON.stringify(moveLatencyStats))
   })
 };
@@ -632,6 +651,7 @@ window.__pokerDebug = {
     :calculate-all-scores="calculateAllScores"
     :reset-game="handleHardReset"
     :copy-room-id="copyRoomId"
+    :health-alert="healthAlert"
     :move-latency-stats="moveLatencyStats"
   />
   <div v-else class="table-container">
