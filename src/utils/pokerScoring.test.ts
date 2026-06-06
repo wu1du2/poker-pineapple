@@ -1,13 +1,13 @@
 // src/utils/pokerScoring.test.ts
 import { describe, it, expect } from 'vitest';
-import { calculateSlotSettlement, calculateTotalSettlement, HandCategory } from './pokerScoring';
+import { calculateGameSettlement, calculateSlotSettlement, calculateTotalSettlement, HandCategory } from './pokerScoring';
 import type { PlayerSlotInfo } from './pokerScoring';
 
 describe('Poker Scoring Logic', () => {
   
   // 辅助函数：快速创建玩家信息
-  const createPlayer = (seatIndex: number, category: number, hasPlayed = true, isRoyal = false): PlayerSlotInfo => ({
-    seatIndex, category, hasPlayed, isRoyal
+  const createPlayer = (seatIndex: number, category: number, hasPlayed = true, isRoyal = false, isSurrendered = false): PlayerSlotInfo => ({
+    seatIndex, category, hasPlayed, isRoyal, isSurrendered
   });
 
   it('场景1: Slot 1 (5倍), 单一赢家 (四条 vs 葫芦)', () => {
@@ -109,6 +109,21 @@ describe('Poker Scoring Logic', () => {
     // 没人输，没人赢
     expect(result.find(r => r.seatIndex === 1)?.scoreDelta).toBe(0);
     expect(result.find(r => r.seatIndex === 2)?.scoreDelta).toBe(0);
+  });
+
+  it('认输玩家每个slot算输，且单道输分减半进入奖池', () => {
+    const players = [
+      createPlayer(1, HandCategory.FourOfAKind),
+      createPlayer(2, HandCategory.FullHouse),
+      createPlayer(3, HandCategory.HighCard, true, false, true)
+    ];
+
+    const result = calculateSlotSettlement(players, [1], 1);
+
+    expect(result.find(r => r.seatIndex === 1)?.scoreDelta).toBe(75);
+    expect(result.find(r => r.seatIndex === 2)?.scoreDelta).toBe(-50);
+    expect(result.find(r => r.seatIndex === 3)?.scoreDelta).toBe(-25);
+    expect(result.reduce((sum, r) => sum + r.scoreDelta, 0)).toBe(0);
   });
 
   describe('通输逻辑测试', () => {
@@ -222,6 +237,118 @@ describe('Poker Scoring Logic', () => {
       // 总分数变化量之和应该为0
       const totalDelta = result.reduce((sum, r) => sum + r.totalDelta, 0);
       expect(totalDelta).toBe(0);
+    });
+
+    it('认输通输玩家的通输惩罚减半，其他玩家只分实际扣出的分', () => {
+      const slotResults = [
+        [{ seatIndex: 1, scoreDelta: 75 }, { seatIndex: 2, scoreDelta: -50 }, { seatIndex: 3, scoreDelta: -25 }],
+        [{ seatIndex: 1, scoreDelta: -30 }, { seatIndex: 2, scoreDelta: 45 }, { seatIndex: 3, scoreDelta: -15 }],
+        [{ seatIndex: 1, scoreDelta: 1 }, { seatIndex: 2, scoreDelta: 0 }, { seatIndex: 3, scoreDelta: -1 }]
+      ];
+
+      const result = calculateTotalSettlement(slotResults, [1, 2, 3], [3]);
+
+      expect(result.find(r => r.seatIndex === 1)?.totalLoserDelta).toBe(15);
+      expect(result.find(r => r.seatIndex === 2)?.totalLoserDelta).toBe(15);
+      expect(result.find(r => r.seatIndex === 3)?.totalLoserDelta).toBe(-30);
+      expect(result.find(r => r.seatIndex === 1)?.totalDelta).toBe(61);
+      expect(result.find(r => r.seatIndex === 2)?.totalDelta).toBe(10);
+      expect(result.find(r => r.seatIndex === 3)?.totalDelta).toBe(-71);
+      expect(result.reduce((sum, r) => sum + r.totalDelta, 0)).toBe(0);
+    });
+  });
+
+  describe('认输兜底', () => {
+    it('认输玩家不能成为赢家，完整结算按输一半处理', () => {
+      const seats = [
+        {
+          isSurrendered: true,
+          slots: {
+            1: [{ suit: '♠', rank: 'A' }, { suit: '♥', rank: 'A' }],
+            2: [{ suit: '♠', rank: 'K' }, { suit: '♥', rank: 'K' }],
+            3: [{ suit: '♠', rank: 'Q' }, { suit: '♥', rank: 'Q' }]
+          }
+        },
+        {
+          slots: {
+            1: [{ suit: '♣', rank: '2' }, { suit: '♦', rank: '3' }],
+            2: [{ suit: '♣', rank: '4' }, { suit: '♦', rank: '5' }],
+            3: [{ suit: '♣', rank: '6' }, { suit: '♦', rank: '7' }]
+          }
+        }
+      ];
+      const communityCards = [
+        { suit: '♠', rank: '2' },
+        { suit: '♥', rank: '4' },
+        { suit: '♣', rank: '8' },
+        { suit: '♦', rank: '10' },
+        { suit: '♠', rank: 'J' }
+      ];
+
+      const result = calculateGameSettlement(seats, communityCards);
+      const surrendered = result.settlementResults.find(r => r.seatIndex === 0);
+      const winner = result.settlementResults.find(r => r.seatIndex === 1);
+
+      expect(result.winningSlots).toEqual({ 1: [1, 2, 3] });
+      expect(surrendered?.slot1Delta).toBeLessThan(0);
+      expect(surrendered?.slot2Delta).toBeLessThan(0);
+      expect(surrendered?.slot3Delta).toBeLessThan(0);
+      expect(surrendered?.totalLoserDelta).toBe(-30);
+      expect(winner?.totalLoserDelta).toBe(30);
+      expect(result.totalDeltaSum).toBe(0);
+    });
+
+    it('全员认输时正常结算为0分，不触发通输惩罚', () => {
+      const seats = [
+        {
+          isSurrendered: true,
+          slots: {
+            1: [{ suit: '♠', rank: 'A' }, { suit: '♥', rank: 'A' }],
+            2: [{ suit: '♠', rank: 'K' }, { suit: '♥', rank: 'K' }],
+            3: [{ suit: '♠', rank: 'Q' }, { suit: '♥', rank: 'Q' }]
+          }
+        },
+        {
+          isSurrendered: true,
+          slots: {
+            1: [{ suit: '♣', rank: '2' }, { suit: '♦', rank: '2' }],
+            2: [{ suit: '♣', rank: '3' }, { suit: '♦', rank: '3' }],
+            3: [{ suit: '♣', rank: '4' }, { suit: '♦', rank: '4' }]
+          }
+        }
+      ];
+      const communityCards = [
+        { suit: '♠', rank: '2' },
+        { suit: '♥', rank: '3' },
+        { suit: '♣', rank: '4' },
+        { suit: '♦', rank: '5' },
+        { suit: '♠', rank: '6' }
+      ];
+
+      const result = calculateGameSettlement(seats, communityCards);
+
+      expect(result.winningSlots).toEqual({});
+      expect(result.totalDeltaSum).toBe(0);
+      expect(result.settlementResults).toEqual([
+        expect.objectContaining({
+          seatIndex: 0,
+          slot1Delta: 0,
+          slot2Delta: 0,
+          slot3Delta: 0,
+          totalLoserDelta: 0,
+          totalDelta: 0,
+          isTotalLoser: false
+        }),
+        expect.objectContaining({
+          seatIndex: 1,
+          slot1Delta: 0,
+          slot2Delta: 0,
+          slot3Delta: 0,
+          totalLoserDelta: 0,
+          totalDelta: 0,
+          isTotalLoser: false
+        })
+      ]);
     });
   });
 });

@@ -60,12 +60,23 @@ interface Player {
   isReady: boolean;
   isDone: boolean;
   isAway: boolean; // 新增：暂离状态
+  isSurrendered?: boolean;
   isBot?: boolean;
+}
+
+interface ScoreboardEntry {
+  id: string;
+  name: string;
+  score: number;
+  isBot: boolean;
+  isSeated: boolean;
+  seatIndex: number | null;
 }
 
 interface GameState {
   roomId?: string;
   seats: (Player | null)[];
+  scoreboard?: ScoreboardEntry[];
   communityCards: Card[];
   billboard: string;
   phase?: string;
@@ -130,6 +141,13 @@ const syncMyPrivateCards = (afterSync?: () => void) => {
     afterSync?.();
   });
 };
+
+function clearLocalSeatState() {
+  mySeatIndex.value = -1;
+  myHand.value = [];
+  mySlots.value = { 1: [], 2: [], 3: [] };
+  isReady.value = false;
+}
 
 const generateToken = () => {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -205,6 +223,11 @@ onMounted(() => {
   socket.on('update', (state) => {
     Object.assign(gameState, state);
     syncSettlementFromState(gameState);
+
+    if (mySeatIndex.value !== -1 && !gameState.seats[mySeatIndex.value]) {
+      clearLocalSeatState();
+      return;
+    }
     
     if (mySeatIndex.value !== -1) {
       syncMyPrivateCards(recordMoveUpdateCommit);
@@ -214,6 +237,10 @@ onMounted(() => {
         isReady.value = gameState.phase === 'PLAYING' ? Boolean(mySeat.isDone) : mySeat.isReady;
       }
     }
+  });
+
+  socket.on('seat-kicked', () => {
+    clearLocalSeatState();
   });
 
   socket.on('force-reload', () => {
@@ -251,8 +278,9 @@ const sit = (index: number) => {
   }
 };
 
-const toggleAway = () => {
-  socket.emit('toggle-away');
+const surrender = () => {
+  if (mySeatIndex.value === -1) return;
+  socket.emit('surrender', { seatIndex: mySeatIndex.value });
 };
 
 const renameDisplayName = (name: string) => {
@@ -268,6 +296,10 @@ const renameDisplayName = (name: string) => {
 const updateMyName = (e: Event) => {
   const input = e.target as HTMLInputElement;
   renameDisplayName(input.value);
+};
+
+const kickSeat = (seatIndex: number) => {
+  socket.emit('kick-seat', { seatIndex });
 };
 
 const updateBillboard = (e: Event) => {
@@ -483,6 +515,7 @@ const handleHardReset = () => {
 
 const clickHandCard = (card: Card) => {
   if (mySeatIndex.value === -1) return;
+  if (gameState.seats[mySeatIndex.value]?.isSurrendered) return;
   let targetSlot = 0;
   for (let i = 1; i <= 3; i++) {
     if ((mySlots.value[i]?.length || 0) < 2) {
@@ -500,6 +533,7 @@ const clickHandCard = (card: Card) => {
 
 const clickSlotCard = (card: Card) => {
   if (mySeatIndex.value === -1) return;
+  if (gameState.seats[mySeatIndex.value]?.isSurrendered) return;
   moveCardToHandLocally(card);
   emitMoveCard(card.id, 'hand', syncMyPrivateCards);
 };
@@ -588,10 +622,11 @@ window.__pokerDebug = {
     :sit="sit"
     :update-my-name="updateMyName"
     :rename-display-name="renameDisplayName"
+    :kick-seat="kickSeat"
     :click-hand-card="clickHandCard"
     :click-slot-card="clickSlotCard"
     :toggle-ready="toggleReady"
-    :toggle-away="toggleAway"
+    :surrender="surrender"
     :control="control"
     :calculate-all-scores="calculateAllScores"
     :reset-game="handleHardReset"
@@ -802,10 +837,11 @@ window.__pokerDebug = {
               </button>
               <button 
                 class="ready-btn btn-warning" 
-                :class="{ 'active': seat.isAway }"
-                @click="toggleAway" 
-                title="暂离/回归">
-                {{ seat.isAway ? '回归' : '暂离' }}
+                :class="{ 'active': seat.isSurrendered }"
+                :disabled="seat.isSurrendered"
+                @click="surrender"
+                title="认输">
+                {{ seat.isSurrendered ? '已认输' : '认输' }}
               </button>
             </div>
           </div>

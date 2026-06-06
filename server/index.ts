@@ -7,7 +7,14 @@ import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
 import { createPlayerState, type Card, type Player } from './playerTypes';
 import { clearSettlementState, settleRoundScores } from './settlement';
-import { createRoomStore, DEFAULT_ROOM_ID, SEAT_COUNT, type RoomState } from './rooms';
+import {
+  createRoomStore,
+  DEFAULT_ROOM_ID,
+  restoreSeatScoreFromScoreboard,
+  SEAT_COUNT,
+  syncScoreboardFromSeats,
+  type RoomState
+} from './rooms';
 import {
   areRoundParticipantsDone,
   canStartRound,
@@ -128,6 +135,7 @@ function startNewRound(room: RoomState) {
     p.isFolded = false;
     p.isShowing = false;
     p.isDone = false;
+    p.isSurrendered = false;
 
     if (p.isAway || !isRoundParticipant(room.roundSeatIndices, seatIndex)) {
       p.isReady = false;
@@ -140,6 +148,7 @@ function startNewRound(room: RoomState) {
   });
 
   room.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+  syncScoreboardFromSeats(room);
   io.to(room.roomId).emit('reset-table');
   emitRoomUpdate(room);
 }
@@ -175,6 +184,7 @@ function completeShowdown(room: RoomState) {
   scheduleReveal(room, 5000, () => {
     if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_RIVER') return;
     settleRoundScores(room);
+    syncScoreboardFromSeats(room);
     room.phase = 'SHOWDOWN_SETTLED';
     emitRoomUpdate(room);
     io.to(room.roomId).emit('all-players-ready');
@@ -193,6 +203,7 @@ app.post('/debug/mock6-showdown', (_req, res) => {
   room.roundSeatIndices = mockState.seats.map((_, seatIndex) => seatIndex);
   clearSettlementState(room);
   settleRoundScores(room);
+  syncScoreboardFromSeats(room);
   io.to(room.roomId).emit('reset-table');
   emitRoomUpdate(room);
   res.json(getPublicState(room));
@@ -243,6 +254,7 @@ io.on('connection', (socket: Socket) => {
     });
     if (found) {
       console.log(`Player restored session: ${token} -> ${socket.id} in room ${room.roomId}`);
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
     } else {
       socket.emit('room-joined', { roomId: room.roomId, state: getPublicState(room) });
@@ -254,12 +266,15 @@ io.on('connection', (socket: Socket) => {
     const room = getSocketRoom(socket);
     if (!room.seats[seatIndex]) {
       // const isFirstPlayer = gameState.seats.every(s => s === null); // 移除首位玩家判断
-      room.seats[seatIndex] = createPlayerState({
+      const player = createPlayerState({
         id: socket.id,
         token: token, // 绑定 Token
         name
       });
+      restoreSeatScoreFromScoreboard(room, player);
+      room.seats[seatIndex] = player;
       // if (isFirstPlayer) gameState.dealerIndex = seatIndex; // 移除庄家设置
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
     }
   });
@@ -271,7 +286,25 @@ io.on('connection', (socket: Socket) => {
     if (seatIndex !== -1) {
       const p = room.seats[seatIndex];
       p.isAway = !p.isAway;
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
+    }
+  });
+
+  socket.on('surrender', ({ seatIndex }) => {
+    const room = getSocketRoom(socket);
+    const p = room.seats[seatIndex];
+    if (!p || p.id !== socket.id || p.isAway) return;
+    if (room.phase !== 'PLAYING') return;
+    if (!isRoundParticipant(room.roundSeatIndices, seatIndex)) return;
+
+    p.isSurrendered = true;
+    p.isDone = true;
+    p.isReady = false;
+    emitRoomUpdate(room);
+
+    if (areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
+      completeShowdown(room);
     }
   });
 
@@ -280,7 +313,32 @@ io.on('connection', (socket: Socket) => {
     const p = room.seats[seatIndex];
     if (p) {
       p.name = name.substring(0, 12);
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
+    }
+  });
+
+  socket.on('kick-seat', ({ seatIndex }) => {
+    const room = getSocketRoom(socket);
+    const targetSeatIndex = Number(seatIndex);
+    if (!Number.isInteger(targetSeatIndex) || targetSeatIndex < 0 || targetSeatIndex >= SEAT_COUNT) return;
+
+    const kickedSeat = room.seats[targetSeatIndex];
+    if (!kickedSeat) return;
+
+    room.seats[targetSeatIndex] = null;
+    syncScoreboardFromSeats(room);
+    io.to(kickedSeat.id).emit('seat-kicked', { seatIndex: targetSeatIndex, roomId: room.roomId });
+
+    if (room.phase === 'PLAYING' && areRoundParticipantsDone(room.seats, room.roundSeatIndices)) {
+      completeShowdown(room);
+      return;
+    }
+
+    emitRoomUpdate(room);
+
+    if (!room.phase?.startsWith('SHOWDOWN') && room.phase !== 'PLAYING' && canStartRound(room.seats)) {
+      startNewRound(room);
     }
   });
 
@@ -291,6 +349,7 @@ io.on('connection', (socket: Socket) => {
       const val = parseInt(score);
       if (!isNaN(val)) {
         p.score = val;
+        syncScoreboardFromSeats(room);
         emitRoomUpdate(room);
       }
     }
@@ -346,7 +405,7 @@ io.on('connection', (socket: Socket) => {
     const room = getSocketRoom(socket);
     const p = room.seats[seatIndex];
     // 严格校验 ID，且暂离玩家不可操作
-    if (!p || p.id !== socket.id || p.isAway) {
+    if (!p || p.id !== socket.id || p.isAway || p.isSurrendered) {
       respond(false, 'invalid-seat');
       return;
     }
@@ -421,6 +480,10 @@ io.on('connection', (socket: Socket) => {
     const room = getSocketRoom(socket);
     if (action === 'fill-ai') {
       fillEmptySeatsWithAi(room.seats);
+      room.seats.forEach((seat) => {
+        if (seat) restoreSeatScoreFromScoreboard(room, seat);
+      });
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
     } else if (action === 'new-game') {
       startNewRound(room);
@@ -441,6 +504,7 @@ io.on('connection', (socket: Socket) => {
       room.communityCards.push(deck.deal());
       if (room.communityCards.length >= 5) {
         settleRoundScores(room);
+        syncScoreboardFromSeats(room);
       }
       emitRoomUpdate(room);
       
@@ -454,10 +518,12 @@ io.on('connection', (socket: Socket) => {
       room.communityCards.push(deck.deal());
       if (room.phase === 'SHOWDOWN' && room.communityCards.length >= 5) {
         settleRoundScores(room);
+        syncScoreboardFromSeats(room);
       }
       emitRoomUpdate(room);
     } else if (action === 'settle-scores') {
       settleRoundScores(room);
+      syncScoreboardFromSeats(room);
       emitRoomUpdate(room);
     }
   });
@@ -469,6 +535,7 @@ io.on('connection', (socket: Socket) => {
       room.communityCards = [];
       // gameState.dealerIndex = -1; // 移除庄家重置
       room.seats = new Array(SEAT_COUNT).fill(null);
+      room.scoreboard = [];
       room.billboard = "公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2";
       clearSettlementState(room);
       room.roundId = 0;
@@ -493,7 +560,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('ready', ({ seatIndex, ready }) => {
     const room = getSocketRoom(socket);
     const p = room.seats[seatIndex];
-    if (p && p.id === socket.id && !p.isAway) {
+    if (p && p.id === socket.id && !p.isAway && !p.isSurrendered) {
       if (room.phase === 'PLAYING') {
         if (!isRoundParticipant(room.roundSeatIndices, seatIndex)) return;
         if (ready && !isSeatFullyArranged(p)) return;

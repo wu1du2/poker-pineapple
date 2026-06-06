@@ -5,9 +5,19 @@ export const DEFAULT_ROOM_ID = '000000';
 export const SEAT_COUNT = 6;
 const BILLBOARD = '公告板 皇家同花顺20 同花顺15 炸弹10 葫芦6 同花5 顺子4 三条3 两对2';
 
+export interface ScoreboardEntry {
+  id: string;
+  name: string;
+  score: number;
+  isBot: boolean;
+  isSeated: boolean;
+  seatIndex: number | null;
+}
+
 export interface RoomState {
   roomId: string;
   seats: (Player | null)[];
+  scoreboard: ScoreboardEntry[];
   communityCards: Card[];
   settlementResults: SlotSettlementResult[];
   winningSlots: Record<number, number[]>;
@@ -24,6 +34,7 @@ export function createRoomState(roomId: string): RoomState {
   return {
     roomId,
     seats: new Array(SEAT_COUNT).fill(null),
+    scoreboard: [],
     communityCards: [],
     settlementResults: [],
     winningSlots: {},
@@ -35,6 +46,49 @@ export function createRoomState(roomId: string): RoomState {
     billboard: BILLBOARD,
     phase: 'LOBBY'
   };
+}
+
+function getScoreboardId(player: Player): string {
+  return player.token || player.id;
+}
+
+export function restoreSeatScoreFromScoreboard(room: RoomState, player: Player): void {
+  const entry = room.scoreboard.find((item) => item.id === getScoreboardId(player));
+  if (!entry) return;
+
+  player.score = entry.score;
+}
+
+export function syncScoreboardFromSeats(room: RoomState): void {
+  room.scoreboard.forEach((entry) => {
+    entry.isSeated = false;
+    entry.seatIndex = null;
+  });
+
+  room.seats.forEach((seat, seatIndex) => {
+    if (!seat) return;
+
+    const id = getScoreboardId(seat);
+    const existing = room.scoreboard.find((entry) => entry.id === id);
+    if (existing) {
+      existing.name = seat.name;
+      existing.score = seat.score;
+      existing.isBot = seat.isBot;
+      existing.isSeated = true;
+      existing.seatIndex = seatIndex;
+    } else {
+      room.scoreboard.push({
+        id,
+        name: seat.name,
+        score: seat.score,
+        isBot: seat.isBot,
+        isSeated: true,
+        seatIndex
+      });
+    }
+  });
+
+  room.scoreboard.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
 export function createRoomStore() {

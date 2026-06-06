@@ -22,10 +22,21 @@ interface Player {
   isReady: boolean;
   isDone: boolean;
   isAway: boolean;
+  isSurrendered?: boolean;
+}
+
+interface ScoreboardEntry {
+  id: string;
+  name: string;
+  score: number;
+  isBot: boolean;
+  isSeated: boolean;
+  seatIndex: number | null;
 }
 
 interface GameState {
   seats: (Player | null)[];
+  scoreboard?: ScoreboardEntry[];
   communityCards: Card[];
   billboard: string;
   phase?: string;
@@ -68,10 +79,11 @@ const props = defineProps<{
   sit: (index: number) => void;
   updateMyName: (event: Event) => void;
   renameDisplayName: (name: string) => void;
+  kickSeat: (seatIndex: number) => void;
   clickHandCard: (card: Card) => void;
   clickSlotCard: (card: Card) => void;
   toggleReady: () => void;
-  toggleAway: () => void;
+  surrender: () => void;
   control: (action: string) => void;
   calculateAllScores: () => void;
   resetGame: () => void;
@@ -126,9 +138,21 @@ const tutorialPages: TutorialPage[] = [
 
 const isTutorialOpen = ref(false);
 const tutorialPageIndex = ref(0);
+const topMenu = ref<HTMLDetailsElement | null>(null);
+const menuPanel = ref<'main' | 'scoreboard' | 'kick'>('main');
 const tutorialPage = computed<TutorialPage>(() => tutorialPages[tutorialPageIndex.value] || tutorialPages[0] as TutorialPage);
 
+const closeTopMenu = () => {
+  menuPanel.value = 'main';
+  if (topMenu.value) topMenu.value.open = false;
+};
+
+const handleTopMenuToggle = () => {
+  if (!topMenu.value?.open) menuPanel.value = 'main';
+};
+
 const openTutorial = () => {
+  closeTopMenu();
   tutorialPageIndex.value = 0;
   isTutorialOpen.value = true;
 };
@@ -152,6 +176,15 @@ const promptRename = () => {
 };
 
 const seatedPlayers = computed(() => props.gameState.seats.filter(Boolean).length);
+const seatedEntries = computed(() => {
+  return props.gameState.seats
+    .map((seat, seatIndex) => ({ seat, seatIndex }))
+    .filter((entry): entry is { seat: Player; seatIndex: number } => Boolean(entry.seat));
+});
+const sortedScoreboard = computed(() => {
+  return [...(props.gameState.scoreboard || [])]
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+});
 const isShowdown = computed(() => props.gameState.phase?.startsWith('SHOWDOWN') || props.settlementResults.length > 0);
 const isArranging = computed(() => props.gameState.phase === 'PLAYING');
 const isInRound = computed(() => isArranging.value || isShowdown.value);
@@ -160,6 +193,7 @@ const firstEmptySeatIndex = computed(() => props.gameState.seats.findIndex((seat
 const canFillAi = computed(() => Boolean(mySeat.value) && firstEmptySeatIndex.value !== -1 && !isArranging.value);
 const primaryActionActive = computed(() => isArranging.value ? Boolean(mySeat.value?.isDone) : Boolean(mySeat.value?.isReady));
 const primaryActionLabel = computed(() => {
+  if (isArranging.value && mySeat.value?.isSurrendered) return '已认输';
   if (isArranging.value) return mySeat.value?.isDone ? '已放好' : '牌放好了 done';
   return mySeat.value?.isReady ? '已准备' : '准备下一局 ready';
 });
@@ -167,6 +201,7 @@ const primaryActionDisabled = computed(() => {
   if (!mySeat.value) return true;
   if (isShowdown.value && !props.gameState.isSettled) return true;
   if (!isArranging.value) return false;
+  if (mySeat.value.isSurrendered) return true;
   return !mySeat.value.isDone && !props.checkAllSlotsFilled();
 });
 const showdownStatusLabel = computed(() => {
@@ -178,13 +213,12 @@ const showdownStatusLabel = computed(() => {
 });
 const seatStatusLabel = (seat: Player) => {
   if (seat.isAway) return '暂离';
+  if (seat.isSurrendered) return '认输';
   if (isArranging.value) return seat.isDone ? 'Done' : '摆牌';
   return seat.isReady ? 'Ready' : '等待';
 };
 const resultPlayers = computed(() => {
-  return props.gameState.seats
-    .map((seat, seatIndex) => ({ seat, seatIndex }))
-    .filter((entry): entry is { seat: Player; seatIndex: number } => Boolean(entry.seat));
+  return seatedEntries.value;
 });
 
 const findSettlement = (seatIndex: number) => {
@@ -247,17 +281,48 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       <button type="button" class="room-chip" data-testid="room-id-chip" @click="copyRoomId">
         房间 {{ roomId }}
       </button>
-      <details class="top-menu" data-testid="mobile-top-menu">
+      <details ref="topMenu" class="top-menu" data-testid="mobile-top-menu" @toggle="handleTopMenuToggle">
         <summary aria-label="更多操作">...</summary>
         <div class="top-menu-content">
-          <div class="latency-panel" data-testid="move-latency-panel">
-            <span>move {{ moveLatencyStats.lastRoundTripMs }}ms</span>
-            <span>avg {{ moveLatencyStats.avgRoundTripMs }} / max {{ moveLatencyStats.maxRoundTripMs }}</span>
-            <span>ack {{ moveLatencyStats.lastAckMs }} · srv {{ moveLatencyStats.lastServerMs }} · ui {{ moveLatencyStats.lastRenderMs }}</span>
+          <div v-if="menuPanel === 'main'" class="menu-panel">
+            <div class="latency-panel" data-testid="move-latency-panel">
+              <span>move {{ moveLatencyStats.lastRoundTripMs }}ms</span>
+              <span>avg {{ moveLatencyStats.avgRoundTripMs }} / max {{ moveLatencyStats.maxRoundTripMs }}</span>
+              <span>ack {{ moveLatencyStats.lastAckMs }} · srv {{ moveLatencyStats.lastServerMs }} · ui {{ moveLatencyStats.lastRenderMs }}</span>
+            </div>
+            <button type="button" @click="resetGame">重置游戏</button>
+            <button type="button" @click="promptRename">修改名字</button>
+            <button type="button" @click="openTutorial">教程</button>
+            <button type="button" @click="menuPanel = 'scoreboard'">积分榜</button>
+            <button type="button" @click="menuPanel = 'kick'">踢人</button>
           </div>
-          <button type="button" @click="resetGame">重置游戏</button>
-          <button type="button" @click="promptRename">修改名字</button>
-          <button type="button" @click="openTutorial">教程</button>
+          <div v-else-if="menuPanel === 'scoreboard'" class="menu-panel" data-testid="scoreboard-menu">
+            <div class="menu-subheader">
+              <strong>积分榜</strong>
+              <button type="button" @click="menuPanel = 'main'">返回</button>
+            </div>
+            <div class="scoreboard-menu">
+              <div v-if="sortedScoreboard.length === 0" class="scoreboard-empty">暂无分数</div>
+              <div v-for="entry in sortedScoreboard" :key="entry.id" class="scoreboard-row" :class="{ seated: entry.isSeated }">
+                <span class="scoreboard-name">{{ entry.name }}</span>
+                <span class="scoreboard-seat">{{ entry.isSeated && entry.seatIndex !== null ? `座位${entry.seatIndex + 1}` : '离座' }}</span>
+                <strong>{{ entry.score }}</strong>
+              </div>
+            </div>
+          </div>
+          <div v-else class="menu-panel" data-testid="kick-menu">
+            <div class="menu-subheader">
+              <strong>踢人</strong>
+              <button type="button" @click="menuPanel = 'main'">返回</button>
+            </div>
+            <div class="kick-menu">
+              <div v-if="seatedEntries.length === 0" class="kick-empty">暂无玩家</div>
+              <div v-for="{ seat, seatIndex } in seatedEntries" :key="seatIndex" class="kick-row">
+                <span>{{ seat.name }} · 座位{{ seatIndex + 1 }}</span>
+                <button type="button" :aria-label="`踢出 ${seat.name}`" @click="kickSeat(seatIndex)">踢出</button>
+              </div>
+            </div>
+          </div>
         </div>
       </details>
     </header>
@@ -347,7 +412,14 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
       </div>
 
       <div class="mobile-actions">
-        <button type="button" class="secondary-action" @click="toggleAway">{{ mySeat.isAway ? '回归' : '暂离' }}</button>
+        <button
+          type="button"
+          class="secondary-action surrender-action"
+          :disabled="mySeat.isSurrendered"
+          @click="surrender"
+        >
+          {{ mySeat.isSurrendered ? '已认输' : '认输' }}
+        </button>
         <button
           type="button"
           class="primary-action"
@@ -591,17 +663,118 @@ const clickMySlotCell = (slotId: number, cellIndex: number) => {
   right: 0;
   top: calc(100% + 6px);
   z-index: 4;
-  width: 188px;
+  width: 236px;
   padding: 6px;
   border-radius: 8px;
   background: rgba(8, 22, 19, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.14);
   display: grid;
   gap: 6px;
+  max-height: calc(100dvh - 132px);
+  overflow-y: auto;
 }
 
 .top-menu button:disabled {
   opacity: 0.45;
+}
+
+.menu-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.menu-subheader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: #edf7f4;
+  font-size: 14px;
+}
+
+.menu-subheader button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.scoreboard-menu,
+.kick-menu {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 6px;
+  display: grid;
+  gap: 5px;
+}
+
+.scoreboard-menu-title,
+.scoreboard-empty,
+.kick-menu-title,
+.kick-empty {
+  color: #b9ccc6;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.scoreboard-empty,
+.kick-empty {
+  font-weight: 600;
+}
+
+.scoreboard-row {
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  color: rgba(237, 247, 244, 0.68);
+  font-size: 12px;
+}
+
+.scoreboard-row.seated {
+  color: #edf7f4;
+}
+
+.scoreboard-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scoreboard-seat {
+  color: #b9ccc6;
+  font-size: 10px;
+}
+
+.scoreboard-row strong {
+  min-width: 28px;
+  text-align: right;
+  color: #f8d56b;
+}
+
+.kick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  color: #edf7f4;
+  font-size: 12px;
+}
+
+.kick-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kick-row button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #69302f;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .tutorial-overlay {

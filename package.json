@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "server": "tsx server/index.ts",
     "test:e2e:mock6": "node scripts/mock6-showdown.mjs",
-    "test:e2e:solo-ai": "node scripts/solo-ai-smoke.mjs"
+    "test:e2e:solo-ai": "node scripts/solo-ai-smoke.mjs",
+    "test:e2e:surrender": "node scripts/surrender-smoke.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

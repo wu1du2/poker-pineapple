@@ -116,6 +116,32 @@ async function main() {
       const state = window.__pokerDebug?.getState()?.gameState;
       return state?.seats?.filter(Boolean).length === 1 && state.seats[0]?.name === '桌主A';
     });
+    await page.getByRole('button', { name: '踢人' }).click();
+    await page.getByRole('button', { name: '踢出 桌主A' }).click();
+    await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState();
+      return state?.mySeatIndex === -1 && state?.gameState?.seats?.filter(Boolean).length === 0;
+    });
+    const kickedPlayerRetainedOnScoreboard = await page.evaluate(() => {
+      const entry = window.__pokerDebug?.getState()?.gameState?.scoreboard?.find((item) => item.name === '桌主A');
+      return entry?.score === 0 && entry?.isSeated === false;
+    });
+    if (!kickedPlayerRetainedOnScoreboard) {
+      throw new Error('Expected kicked player to remain on the room scoreboard as an unseated player');
+    }
+    await page.getByTestId('mobile-top-menu').locator('summary').click();
+    await page.getByRole('button', { name: '一键入座' }).click();
+    await page.waitForFunction(() => {
+      const state = window.__pokerDebug?.getState();
+      return state?.mySeatIndex === 0 && state?.gameState?.seats?.[0]?.name === '桌主A';
+    });
+    const returningPlayerRestoredOnScoreboard = await page.evaluate(() => {
+      const entry = window.__pokerDebug?.getState()?.gameState?.scoreboard?.find((item) => item.name === '桌主A');
+      return entry?.score === 0 && entry?.isSeated === true && entry?.seatIndex === 0;
+    });
+    if (!returningPlayerRestoredOnScoreboard) {
+      throw new Error('Expected returning player to be marked seated on the room scoreboard');
+    }
     const createdRoomChipText = (await page.getByTestId('room-id-chip').textContent())?.trim();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-testid="mobile-game-view"]');
@@ -187,6 +213,8 @@ async function main() {
       const topMenuText = topMenu?.textContent || '';
       return !buttons.includes('亮牌') &&
         Boolean(topMenu) &&
+        topMenuText.includes('积分榜') &&
+        topMenuText.includes('踢人') &&
         topMenuText.includes('重置游戏') &&
         topMenuText.includes('教程');
     });
@@ -194,6 +222,12 @@ async function main() {
       throw new Error('Expected mobile UI to remove reveal button and expose reset/tutorial in top menu');
     }
     await page.getByTestId('mobile-top-menu').locator('summary').click();
+    await page.getByRole('button', { name: '积分榜' }).click();
+    await page.waitForSelector('[data-testid="scoreboard-menu"]');
+    if ((await page.getByRole('button', { name: '返回' }).count()) === 0) {
+      throw new Error('Expected scoreboard detail panel to provide a return button');
+    }
+    await page.getByRole('button', { name: '返回' }).click();
     await page.getByRole('button', { name: '教程' }).click();
     await page.waitForSelector('[data-testid="tutorial-dialog"]');
     let tutorialTitle = (await page.getByTestId('tutorial-title').textContent())?.trim();
@@ -317,6 +351,15 @@ async function main() {
         seats.length === 6 &&
         seats.some((seat) => seat.score !== 0);
     });
+    const scoreboardSortedAfterSettlement = await page.evaluate(() => {
+      const scoreboard = window.__pokerDebug?.getState()?.gameState?.scoreboard || [];
+      return scoreboard.length === 6 &&
+        scoreboard.every((entry, index) => index === 0 || scoreboard[index - 1].score >= entry.score) &&
+        scoreboard.some((entry) => entry.score !== 0);
+    });
+    if (!scoreboardSortedAfterSettlement) {
+      throw new Error('Expected room scoreboard to include all players sorted by score after settlement');
+    }
     const nextRoundReadyButton = page.getByRole('button', { name: '准备下一局 ready' });
     await nextRoundReadyButton.waitFor();
     if (!(await nextRoundReadyButton.isEnabled())) {

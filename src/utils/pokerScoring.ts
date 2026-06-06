@@ -63,6 +63,7 @@ export interface PlayerSlotInfo {
   hasPlayed: boolean; // 是否参与了该道（有2张牌）
   category: number;   // 牌型 ID
   isRoyal?: boolean;  // 是否是皇家同花顺 (特判)
+  isSurrendered?: boolean;
 }
 
 export interface SettlementResult {
@@ -83,6 +84,7 @@ export interface SlotSettlementResult {
 export interface GameSettlementSeat {
   slots: Record<number, CardInput[]>;
   isAway?: boolean;
+  isSurrendered?: boolean;
 }
 
 export interface GameSettlementResult {
@@ -234,8 +236,9 @@ export function calculateSlotSettlement(
   losers.forEach(loser => {
     const res = results.find(r => r.seatIndex === loser.seatIndex);
     if (res) {
-      res.scoreDelta -= unitLoss;
-      totalPot += unitLoss;
+      const loss = loser.isSurrendered ? Math.ceil(unitLoss / 2) : unitLoss;
+      res.scoreDelta -= loss;
+      totalPot += loss;
     }
   });
 
@@ -261,7 +264,8 @@ export function calculateSlotSettlement(
  */
 export function calculateTotalSettlement(
   slotResults: SettlementResult[][],
-  allPlayerSeatIndices: number[]
+  allPlayerSeatIndices: number[],
+  surrenderedSeatIndices: number[] = []
 ): SlotSettlementResult[] {
   // 1. 统计每个玩家是否赢过任何一个slot
   const hasWonAnySlot: Record<number, boolean> = {};
@@ -304,19 +308,22 @@ export function calculateTotalSettlement(
     // 计算惩罚：通输玩家均分60点惩罚
     const unitPenalty = Math.floor(60 / totalLosers.length);
     const remainderPenalty = 60 % totalLosers.length;
+    let totalPenaltyPot = 0;
     
     totalLosers.forEach((seatIndex, index) => {
         const result = totalResults.find(r => r.seatIndex === seatIndex);
         if (result) {
-          const penalty = unitPenalty + (index === 0 ? remainderPenalty : 0);
+          const basePenalty = unitPenalty + (index === 0 ? remainderPenalty : 0);
+          const penalty = surrenderedSeatIndices.includes(seatIndex) ? Math.ceil(basePenalty / 2) : basePenalty;
           result.totalLoserDelta -= penalty;
           result.totalDelta -= penalty;
+          totalPenaltyPot += penalty;
         }
       });
     
-    // 计算获益：非通输玩家均分60点获益
-    const unitBenefit = Math.floor(60 / nonTotalLosers.length);
-    const remainderBenefit = 60 % nonTotalLosers.length;
+    // 计算获益：非通输玩家均分实际扣出的通输惩罚
+    const unitBenefit = Math.floor(totalPenaltyPot / nonTotalLosers.length);
+    const remainderBenefit = totalPenaltyPot % nonTotalLosers.length;
     
     nonTotalLosers.forEach((seatIndex, index) => {
         const result = totalResults.find(r => r.seatIndex === seatIndex);
@@ -347,6 +354,31 @@ export function calculateGameSettlement(
     return { settlementResults, winningSlots, calculatedResults, totalDeltaSum: 0 };
   }
 
+  const activeSeatIndices = seats
+    .map((seat, seatIndex) => ({ seat, seatIndex }))
+    .filter(({ seat }) => seat !== null && !seat.isAway)
+    .map(({ seatIndex }) => seatIndex);
+
+  if (
+    activeSeatIndices.length > 0 &&
+    activeSeatIndices.every((seatIndex) => seats[seatIndex]?.isSurrendered)
+  ) {
+    return {
+      settlementResults: activeSeatIndices.map((seatIndex) => ({
+        seatIndex,
+        slot1Delta: 0,
+        slot2Delta: 0,
+        slot3Delta: 0,
+        totalLoserDelta: 0,
+        totalDelta: 0,
+        isTotalLoser: false
+      })),
+      winningSlots,
+      calculatedResults,
+      totalDeltaSum: 0
+    };
+  }
+
   seats.forEach((seat, seatIndex) => {
     if (!seat || seat.isAway) return;
     const seatCalculatedResults: Record<number, string> = {};
@@ -358,7 +390,15 @@ export function calculateGameSettlement(
       const slotCards = seat.slots[slotId] || [];
       const visibleCards = slotCards.filter((card) => card.id !== 'hidden');
       
-      if (visibleCards.length === 2) {
+      if (seat.isSurrendered) {
+        seatCalculatedResults[slotId] = '认输';
+        seatSlotInfos[slotId] = {
+          seatIndex,
+          hasPlayed: true,
+          category: 0,
+          isSurrendered: true
+        };
+      } else if (visibleCards.length === 2) {
         const pool = [...communityCards, ...visibleCards];
         const result = calculateHandScore5of7(pool);
         const categoryName = HandCategoryName[result.category] || '高牌';
@@ -370,14 +410,16 @@ export function calculateGameSettlement(
           seatIndex,
           hasPlayed: true,
           category: result.category,
-          isRoyal
+          isRoyal,
+          isSurrendered: false
         };
       } else {
         seatCalculatedResults[slotId] = '';
         seatSlotInfos[slotId] = {
           seatIndex,
           hasPlayed: false,
-          category: 0
+          category: 0,
+          isSurrendered: false
         };
       }
     }
@@ -404,11 +446,9 @@ export function calculateGameSettlement(
     slotResults.push(calculateSlotSettlement(players, winnerSeatIndices, slotId));
   }
 
-  const allPlayerSeatIndices = seats
-    .map((seat, seatIndex) => ({ seat, seatIndex }))
-    .filter(({ seat }) => seat !== null && !seat.isAway)
-    .map(({ seatIndex }) => seatIndex);
-  settlementResults.push(...calculateTotalSettlement(slotResults, allPlayerSeatIndices));
+  const allPlayerSeatIndices = activeSeatIndices;
+  const surrenderedSeatIndices = activeSeatIndices.filter((seatIndex) => seats[seatIndex]?.isSurrendered);
+  settlementResults.push(...calculateTotalSettlement(slotResults, allPlayerSeatIndices, surrenderedSeatIndices));
 
   return {
     settlementResults,
