@@ -7,6 +7,7 @@ import { buildMock6ShowdownState } from './debugMock';
 import { arrangeAiHandInOrder, fillEmptySeatsWithAi } from './aiPlayers';
 import { describeRoomProgress } from './roomDiagnostics';
 import { finalizeRound } from './roundFinalizer';
+import { dealFromRoomDeck, resetRoomDeck } from './roomDecks';
 import { createPlayerState, type Card, type Player } from './playerTypes';
 import { clearSettlementState, settleRoundScores } from './settlement';
 import {
@@ -35,9 +36,6 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../dist')));
 
-const SUITS = ['♠', '♥', '♣', '♦'];
-const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-
 interface MoveCardPayload {
   seatIndex: number;
   cardId: string;
@@ -52,22 +50,6 @@ interface MoveCardAck {
   reason?: string;
 }
 
-class Deck {
-  cards: Card[] = [];
-  constructor() { this.reset(); }
-  reset() {
-    this.cards = [];
-    for (let s of SUITS) for (let r of RANKS) 
-      this.cards.push({ suit: s, rank: r, color: (s === '♥' || s === '♦') ? 'red' : 'black', id: s+r });
-    for (let i = this.cards.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
-    }
-  }
-  deal() { return this.cards.pop() as Card; }
-}
-
-const deck = new Deck();
 const roomStore = createRoomStore();
 const revealTimers = new Map<string, NodeJS.Timeout[]>();
 const roomDebugEvents = new Map<string, Array<{ at: string; type: string; details?: Record<string, unknown> }>>();
@@ -134,7 +116,7 @@ function startNewRound(room: RoomState) {
 
   clearRevealTimers(room);
   room.dealTurnCount = 0;
-  deck.reset();
+  resetRoomDeck(room);
   room.communityCards = [];
   clearSettlementState(room);
   room.roundClosed = false;
@@ -163,12 +145,12 @@ function startNewRound(room: RoomState) {
       return;
     }
 
-    for (let i = 0; i < 7; i++) p.hand.push(deck.deal());
+    for (let i = 0; i < 7; i++) p.hand.push(dealFromRoomDeck(room));
     p.isReady = Boolean(p.isBot);
     arrangeAiHandInOrder(p);
   });
 
-  room.communityCards.push(deck.deal(), deck.deal(), deck.deal());
+  room.communityCards.push(dealFromRoomDeck(room), dealFromRoomDeck(room), dealFromRoomDeck(room));
   syncScoreboardFromSeats(room);
   io.to(room.roomId).emit('reset-table');
   emitRoomUpdate(room);
@@ -189,7 +171,7 @@ function completeShowdown(room: RoomState) {
   scheduleReveal(room, 2000, () => {
     if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_REVEAL') return;
     if (room.communityCards.length < 4) {
-      room.communityCards.push(deck.deal());
+      room.communityCards.push(dealFromRoomDeck(room));
     }
     room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
     room.phase = 'SHOWDOWN_TURN';
@@ -200,7 +182,7 @@ function completeShowdown(room: RoomState) {
   scheduleReveal(room, 4000, () => {
     if (room.roundId !== revealRoundId || room.phase !== 'SHOWDOWN_TURN') return;
     if (room.communityCards.length < 5) {
-      room.communityCards.push(deck.deal());
+      room.communityCards.push(dealFromRoomDeck(room));
     }
     room.dealTurnCount = Math.max(0, room.communityCards.length - 3);
     room.phase = 'SHOWDOWN_RIVER';
@@ -559,7 +541,7 @@ io.on('connection', (socket: Socket) => {
       }
 
       room.dealTurnCount++; // 发牌计数加1
-      room.communityCards.push(deck.deal());
+      room.communityCards.push(dealFromRoomDeck(room));
       if (room.communityCards.length >= 5) {
         settleRoundScores(room);
         syncScoreboardFromSeats(room);
@@ -573,7 +555,7 @@ io.on('connection', (socket: Socket) => {
       }
     }
     else if (action === 'deal-river') {
-      room.communityCards.push(deck.deal());
+      room.communityCards.push(dealFromRoomDeck(room));
       if (room.phase === 'SHOWDOWN' && room.communityCards.length >= 5) {
         settleRoundScores(room);
         syncScoreboardFromSeats(room);
@@ -589,7 +571,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('hard-reset', () => {
       const room = getSocketRoom(socket);
       clearRevealTimers(room);
-      deck.reset();
+      resetRoomDeck(room);
       room.communityCards = [];
       // gameState.dealerIndex = -1; // 移除庄家重置
       room.seats = new Array(SEAT_COUNT).fill(null);
